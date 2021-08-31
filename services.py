@@ -1,6 +1,6 @@
-import datetime
 import http.client
 import json
+from datetime import datetime, timezone
 
 
 def get_normalized_nodes(curie_list):
@@ -17,5 +17,6 @@ def get_normalized_nodes(curie_list):
     return {}
 
 
-def log_timestamp(pretext):
-    print(f"{pretext}: {datetime.datetime.now()}")
+def log_timestamp(text):
+    file_suffix_timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H%M%S%f")
+    print(f"{file_suffix_timestamp}: {text}")
