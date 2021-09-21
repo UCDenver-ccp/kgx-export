@@ -1,10 +1,8 @@
 import sqlalchemy
 import os
-import sys
 import models
 import services
 import argparse
-# import urllib.parse
 import logging
 from sqlalchemy.orm import joinedload
 from google.cloud import storage
