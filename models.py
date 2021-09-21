@@ -1,12 +1,14 @@
 import os
 import json
+
+import pymysql.connections
+import sqlalchemy
 from sqlalchemy import Column, String, Integer, Boolean, Float, ForeignKey, UniqueConstraint, create_engine
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from math import fsum
-
-import services
+from google.cloud.sql.connector import connector
 
 Model = declarative_base(name='Model')
 session = None
@@ -49,14 +51,16 @@ class Assertion(Model):
         subject_category = 'biolink:NamedThing'
         if self.object_curie in normalized_nodes and normalized_nodes[self.object_curie] is not None:
             object_name = normalized_nodes[self.object_curie]['id']['label']
-            object_category = normalized_nodes[self.object_curie]['type'][0]
+            object_category = 'biolink:ChemicalEntity' if self.object_curie.startswith('CHEBI') else 'biolink:Protein'  # normalized_nodes[object_id]['type'][0]
         if self.subject_curie in normalized_nodes and normalized_nodes[self.subject_curie] is not None:
             subject_name = normalized_nodes[self.subject_curie]['id']['label']
-            subject_category = normalized_nodes[self.subject_curie]['type'][0]
+            subject_category = 'biolink:ChemicalEntity' if self.subject_curie.startswith('CHEBI') else 'biolink:Protein'  # normalized_nodes[subject_id]['type'][0]
         return [[self.object_curie, object_name, object_category],
                 [self.subject_curie, subject_name, subject_category]]
 
     def get_uniprot_node_kgx(self, normalized_nodes) -> list:
+        if (self.object_curie.startswith('PR:') and not self.object_uniprot) or (self.subject_curie.startswith('PR:') and not self.subject_uniprot):
+            return []
         object_id = self.object_uniprot.uniprot if self.object_uniprot else self.object_curie
         object_name = 'UNKNOWN_NAME'
         object_category = 'biolink:NamedThing'
@@ -66,10 +70,10 @@ class Assertion(Model):
 
         if object_id in normalized_nodes and normalized_nodes[object_id] is not None:
             object_name = normalized_nodes[object_id]['id']['label']
-            object_category = normalized_nodes[object_id]['type'][0]
+            object_category = 'biolink:ChemicalEntity' if object_id.startswith('CHEBI') else 'biolink:Protein'  # normalized_nodes[object_id]['type'][0]
         if subject_id in normalized_nodes and normalized_nodes[subject_id] is not None:
             subject_name = normalized_nodes[subject_id]['id']['label']
-            subject_category = normalized_nodes[subject_id]['type'][0]
+            subject_category = 'biolink:ChemicalEntity' if subject_id.startswith('CHEBI') else 'biolink:Protein'  # normalized_nodes[subject_id]['type'][0]
         return [[object_id, object_name, object_category],
                 [subject_id, subject_name, subject_category]]
 
@@ -88,6 +92,8 @@ class Assertion(Model):
         return [self.get_other_edge_kgx(predicate) for predicate in self.get_predicates()]
 
     def get_other_edge_kgx(self, predicate):
+        if (self.object_curie.startswith('PR:') and not self.object_uniprot) or (self.subject_curie.startswith('PR:') and not self.subject_uniprot):
+            return []
         subject_id = self.subject_uniprot.uniprot if self.subject_uniprot else self.subject_curie
         object_id = self.object_uniprot.uniprot if self.object_uniprot else self.object_curie
         relevant_evidence = [ev for ev in self.evidence_list if ev.get_top_predicate() == predicate]
@@ -303,15 +309,20 @@ class PRtoUniProt(Model):
         self.uniprot = uniprot
 
 
-def init_db(url=None, username=None, password=None):
-    if url is None:
-        if username is None:
-            username = os.getenv('MYSQL_DATABASE_USER', None)
-        if password is None:
-            import urllib.parse
-            password = urllib.parse.quote_plus(os.getenv('MYSQL_DATABASE_PASSWORD', None))
-        url = f"mysql://{username}:{password}@34.69.18.127/text_mined_assertions"
-        services.log_timestamp("Default URL used init_db")
+def init_db(args_object):
+    ip_address = args_object.ip.strip() if args_object.ip else None
+    print(os.getenv('MYSQL_DATABASE_PASSWORD'))
+    url = sqlalchemy.engine.url.URL.create(
+            drivername="mysql+pymysql",
+            username=args_object.user if args_object.user else os.getenv('MYSQL_DATABASE_USER', None),
+            password=args_object.password if args_object.password else os.getenv('MYSQL_DATABASE_PASSWORD', None),
+            database=args_object.database if args_object.database else 'text_mined_assertions',
+            host=ip_address if ip_address else '34.69.18.127',
+            port=3306
+            # query={
+            #     "unix_socket": "/cloudsql/lithe-vault-265816:us-central1:text-mined-assertions-stage"
+            # }
+        )
     engine = create_engine(url, echo=False, future=True)
     global session
     session = sessionmaker()

@@ -12,6 +12,6 @@ WORKDIR $APP_HOME
 COPY . ./
 
 # Install production dependencies.
-RUN pip install SQLAlchemy mysqlclient google-cloud-storage
+RUN pip install SQLAlchemy mysqlclient pymysql google-cloud-storage git+https://github.com/GoogleCloudPlatform/cloud-sql-python-connector
 
 ENTRYPOINT ["python", "Issue92.py"]
