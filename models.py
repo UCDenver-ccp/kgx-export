@@ -2,7 +2,7 @@ import os
 import json
 
 import pymysql.connections
-import sqlalchemy
+# import sqlalchemy
 from sqlalchemy import Column, String, Integer, Boolean, Float, ForeignKey, UniqueConstraint, create_engine
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
@@ -300,7 +300,7 @@ class EvidenceScore(Model):
 
 class PRtoUniProt(Model):
     __tablename__ = 'pr_to_uniprot'
-    pr = Column(String(100), primary_key=True)
+    pr = Column(String(100), ForeignKey('cooccurrence.entity1_curie'), ForeignKey('cooccurrence.entity2_curie'), primary_key=True)
     uniprot = Column(String(100))
     UniqueConstraint('pr', 'uniprot', name='pr+uniprot')
 
@@ -309,21 +309,187 @@ class PRtoUniProt(Model):
         self.uniprot = uniprot
 
 
+class Cooccurrence(Model):
+    __tablename__ = 'cooccurrence'
+    cooccurrence_id = Column(String(27), primary_key=True)
+    entity1_curie = Column(String(100))
+    entity1_uniprot = relationship('PRtoUniProt', viewonly=True, uselist=False, primaryjoin='Cooccurrence.entity1_curie == PRtoUniProt.pr')
+    entity2_curie = Column(String(45))
+    entity2_uniprot = relationship('PRtoUniProt', viewonly=True, uselist=False, primaryjoin='Cooccurrence.entity2_curie == PRtoUniProt.pr')
+    scores_list = relationship('CooccurrenceScores', primaryjoin='Cooccurrence.cooccurrence_id == CooccurrenceScores.cooccurrence_id')
+
+    def get_edge_kgx(self, use_uniprot=False) -> list:
+        entity1 = self.entity1_uniprot if use_uniprot and self.entity1_uniprot else self.entity1_curie
+        entity2 = self.entity2_uniprot if use_uniprot and self.entity2_uniprot else self.entity2_curie
+        supporting_study_results = '|'.join(f'tmkp:{sco.cooccurrence_id}_{sco.level}' for sco in self.scores_list)
+        return [entity1, 'biolink:related_to', entity2, self.cooccurrence_id,
+                'biolink:Association', supporting_study_results, json.dumps(self.get_json_attributes())]
+
+    def get_json_attributes(self) -> list:
+        attributes_list = [
+            {
+                "attribute_type_id": "biolink:original_knowledge_source",
+                "value": "infores:text-mining-provider-cooccurrence",
+                "value_type_id": "biolink:InformationResource",
+                "description": "The Text Mining Provider Concept Cooccurrence KP from NCATS Translator provides cooccurrence metrics for text-mined concepts that cooccur at various levels, e.g. document, sentence, etc. in the biomedical literature.",
+                "attribute_source": "infores:text-mining-provider-cooccurrence"
+            },
+            {
+                "attribute_type_id": "biolink:supporting_data_source",
+                "value": "infores:pubmed",
+                "value_type_id": "biolink:InformationResource",
+                "attribute_source": "infores:text-mining-provider-cooccurrence"
+            }
+        ]
+        for score in self.scores_list:
+            attributes_list.append(score.get_json_attributes())
+        return attributes_list
+
+
+class CooccurrenceScores(Model):
+    __tablename__ = 'cooccurrence_scores'
+    cooccurrence_id = Column(String(27), ForeignKey('cooccurrence.cooccurrence_id'), ForeignKey('cooccurrence_publication.cooccurrence_id'), primary_key=True)
+    level = Column(String(45), ForeignKey('cooccurrence_publication.level'), primary_key=True)
+    publication_list = relationship('CooccurrencePublication', viewonly=True, uselist=True,
+                                    primaryjoin='and_(CooccurrenceScores.cooccurrence_id == CooccurrencePublication.cooccurrence_id, CooccurrenceScores.level == CooccurrencePublication.level)')
+    concept1_count = Column(Integer)
+    concept2_count = Column(Integer)
+    pair_count = Column(Integer)
+    ngd = Column(Float)
+    pmi = Column(Float)
+    pmi_norm = Column(Float)
+    pmi_norm_max = Column(Float)
+    mutual_dependence = Column(Float)
+    lfmd = Column(Float)
+
+    def get_json_attributes(self) -> dict:
+        biolink_level = 'biolink:DocumentLevelConceptCooccurrenceAnalysisResult'
+        desc = 'a single result from computing cooccurrence metrics between two concepts that cooccur at the document level'
+        if self.level == 'document':
+            biolink_level = 'biolink:DocumentLevelConceptCooccurrenceAnalysisResult'
+            desc = 'a single result from computing cooccurrence metrics between two concepts that cooccur at the document level'
+        elif self.level == 'sentence':
+            biolink_level = 'biolink:SentenceLevelConceptCooccurrenceAnalysisResult'
+            desc = 'a single result from computing cooccurrence metrics between two concepts that cooccur at the sentence level'
+        elif self.level == 'title':
+            biolink_level = 'biolink:TitleLevelConceptCooccurrenceAnalysisResult'
+            desc = 'a single result from computing cooccurrence metrics between two concepts that cooccur in the document title'
+        elif self.level == 'abstract':
+            biolink_level = 'biolink:AbstractLevelConceptCooccurrenceAnalysisResult'
+            desc = 'a single result from computing cooccurrence metrics between two concepts that cooccur in the abstract'
+        return {
+            "attribute_type_id": "biolink:supporting_study_result",
+            "value": f"tmkp:{self.cooccurrence_id}_{self.level}",
+            "value_type_id": biolink_level,
+            "description": desc,
+            "attribute_source": "infores:text-mining-provider-cooccurrence",
+            "attributes": [
+                {
+                    "attribute_type_id": "biolink:supporting_document",
+                    "value": '|'.join(f'tmkp:{pub.document_id}' for pub in self.publication_list),
+                    "value_type_id": "biolink:Publication",
+                    "description": f"The documents where the concepts of this assertion were observed to cooccur at the {self.level} level.",
+                    "attribute_source": "infores:pubmed"
+                },
+                {
+                    "attribute_type_id": "biolink:tmkp_concept1_count",
+                    "value": self.concept1_count,
+                    "value_type_id": "SIO:000794",
+                    "description": f"The number of times concept #1 was observed to occur at the {self.level} level in the documents that were processed"
+                },
+                {
+                    "attribute_type_id": "biolink:tmkp_concept2_count",
+                    "value": self.concept2_count,
+                    "value_type_id": "SIO:000794",
+                    "description": f"The number of times concept #2 was observed to occur at the {self.level} level in the documents that were processed"
+                },
+                {
+                    "attribute_type_id": "biolink:tmkp_concept_pair_count",
+                    "value": self.pair_count,
+                    "value_type_id": "SIO:000794",
+                    "description": f"The number of times the concepts of this assertion were observed to cooccur at the {self.level} level in the documents that were processed"
+                },
+                {
+                    "attribute_type_id": "biolink:tmkp_normalized_google_distance",
+                    "value": self.ngd,
+                    "value_type_id": "EDAM:data_1772",
+                    "description": f"The number of times the concepts of this assertion were observed to cooccur at the {self.level} level in the documents that were processed",
+                    "attribute_source": "infores:text-mining-provider-cooccurrence"
+                },
+                {
+                    "attribute_type_id": "biolink:tmkp_pointwise_mutual_information",
+                    "value": self.pmi,
+                    "value_type_id": "EDAM:data_1772",
+                    "description": "The pointwise mutual information score for the concepts in this assertion based on their cooccurrence in the documents that were processed",
+                    "attribute_source": "infores:text-mining-provider-cooccurrence"
+                },
+                {
+                    "attribute_type_id": "biolink:tmkp_normalized_pointwise_mutual_information",
+                    "value": self.pmi_norm,
+                    "value_type_id": "EDAM:data_1772",
+                    "description": "The normalized pointwise mutual information score for the concepts in this assertion based on their cooccurrence in the documents that were processed",
+                    "attribute_source": "infores:text-mining-provider-cooccurrence"
+                },
+                {
+                    "attribute_type_id": "biolink:tmkp_mutual_dependence",
+                    "value": self.mutual_dependence,
+                    "value_type_id": "EDAM:data_1772",
+                    "description": "The mutual dependence (PMI^2) score for the concepts in this assertion based on their cooccurrence in the documents that were processed",
+                    "attribute_source": "infores:text-mining-provider-cooccurrence"
+                },
+                {
+                    "attribute_type_id": "biolink:tmkp_normalized_pointwise_mutual_information_max",
+                    "value": self.pmi_norm_max,
+                    "value_type_id": "EDAM:data_1772",
+                    "description": "A variant of the normalized pointwise mutual information score for the concepts in this assertion based on their cooccurrence in the documents that were processed",
+                    "attribute_source": "infores:text-mining-provider-cooccurrence"
+                },
+                {
+                    "attribute_type_id": "biolink:tmkp_log_frequency_biased_mutual_dependence",
+                    "value": self.lfmd,
+                    "value_type_id": "EDAM:data_1772",
+                    "description": "The log frequency biased mutual dependence score for the concepts in this assertion based on their cooccurrence in the documents that were processed",
+                    "attribute_source": "infores:text-mining-provider-cooccurrence"
+                }
+            ]
+        }
+
+
+class CooccurrencePublication(Model):
+    __tablename__ = 'cooccurrence_publication'
+    cooccurrence_id = Column(String(27), ForeignKey('cooccurrence_scores.cooccurrence_id'), primary_key=True)
+    level = Column(String(45), ForeignKey('cooccurrence_scores.level'), primary_key=True)
+    document_id = Column(String(45), primary_key=True)
+
+
+class ConceptIDF(Model):
+    __tablename__ = 'concept_idf'
+    concept_curie = Column(String(100), primary_key=True)
+    level = Column(String(45), primary_key=True)
+    idf = Column(Float)
+
+
 def init_db(args_object):
-    ip_address = args_object.ip.strip() if args_object.ip else None
-    print(os.getenv('MYSQL_DATABASE_PASSWORD'))
-    url = sqlalchemy.engine.url.URL.create(
-            drivername="mysql+pymysql",
-            username=args_object.user if args_object.user else os.getenv('MYSQL_DATABASE_USER', None),
+    def get_conn() -> pymysql.connections.Connection:
+        conn: pymysql.connections.Connection = connector.connect(
+            os.getenv('MYSQL_DATABASE_INSTANCE', 'lithe-vault-265816:us-central1:text-mined-assertions-stage'),
+            'pymysql',
+            user=args_object.user if args_object.user else os.getenv('MYSQL_DATABASE_USER', None),
             password=args_object.password if args_object.password else os.getenv('MYSQL_DATABASE_PASSWORD', None),
-            database=args_object.database if args_object.database else 'text_mined_assertions',
-            host=ip_address if ip_address else '34.69.18.127',
-            port=3306
-            # query={
-            #     "unix_socket": "/cloudsql/lithe-vault-265816:us-central1:text-mined-assertions-stage"
-            # }
+            database=args_object.database if args_object.database else 'text_mined_assertions'
         )
-    engine = create_engine(url, echo=False, future=True)
+        return conn
+    # ip_address = args_object.ip.strip() if args_object.ip else None
+    # url = sqlalchemy.engine.url.URL.create(
+    #         drivername="mysql+pymysql",
+    #         username=args_object.user if args_object.user else os.getenv('MYSQL_DATABASE_USER', None),
+    #         password=args_object.password if args_object.password else os.getenv('MYSQL_DATABASE_PASSWORD', None),
+    #         database=args_object.database if args_object.database else 'text_mined_assertions',
+    #         host=ip_address if ip_address else '34.69.18.127',
+    #         port=3306
+    #     )
+    # engine = create_engine(url, echo=False, future=True)
+    engine = create_engine('mysql+pymysql://', creator=get_conn)
     global session
     session = sessionmaker()
     session.configure(bind=engine)

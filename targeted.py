@@ -135,8 +135,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     pr_bucket = args.pr if args.pr else 'test_kgx_output_bucket'
     uniprot_bucket = args.uni if args.uni else 'test_kgx_output_bucket'
-    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'prod-creds.json'
-    logging.info(args.ip)
+    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'kgx-creds.json'
     models.init_db(args)
     s = models.session()
     evaluation_subquery = s.query(sqlalchemy.text('DISTINCT(assertion_id) FROM evaluation WHERE overall_correct = 0'))
