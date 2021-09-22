@@ -23,8 +23,12 @@ def write_nodes(outfile, use_uniprot=False) -> None:
         entity1_rows = s.query(sqlalchemy.text('entity1_curie, uniprot FROM cooccurrence LEFT JOIN pr_to_uniprot ON entity1_curie = pr'))
         entity2_rows = s.query(sqlalchemy.text('entity2_curie, uniprot FROM cooccurrence LEFT JOIN pr_to_uniprot ON entity2_curie = pr'))
         for row in entity1_rows:
+            if row[0].startswith('PR:') and len(row) == 1:
+                continue
             curie_list.append(row[1] if len(row) > 1 and row[1] else row[0])
         for row in entity2_rows:
+            if row[0].startswith('PR:') and len(row) == 1:
+                continue
             curie_list.append(row[1] if len(row) > 1 and row[1] else row[0])
     else:
         curie_list = [row[0] for row in s.query(sqlalchemy.text('DISTINCT entity1_curie FROM cooccurrence')).all()]

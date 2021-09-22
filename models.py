@@ -319,6 +319,9 @@ class Cooccurrence(Model):
     scores_list = relationship('CooccurrenceScores', primaryjoin='Cooccurrence.cooccurrence_id == CooccurrenceScores.cooccurrence_id')
 
     def get_edge_kgx(self, use_uniprot=False) -> list:
+        if use_uniprot:
+            if (self.entity1_curie.startswith('PR:') and not self.entity1_uniprot) or (self.entity2_curie.startswith('PR:') and not self.entity2_uniprot):
+                return []
         entity1 = self.entity1_uniprot if use_uniprot and self.entity1_uniprot else self.entity1_curie
         entity2 = self.entity2_uniprot if use_uniprot and self.entity2_uniprot else self.entity2_curie
         supporting_study_results = '|'.join(f'tmkp:{sco.cooccurrence_id}_{sco.level}' for sco in self.scores_list)
