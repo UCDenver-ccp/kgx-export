@@ -1,4 +1,6 @@
-Dockerfile
+.gcloudignore
+.git
+.gitignore
 README.md
 *.pyc
 *.pyo
@@ -10,6 +12,7 @@ __pycache__
 Scripts/
 Include/
 Lib/
+share/
 .idea/
 out/*
 in/*

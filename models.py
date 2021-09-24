@@ -1,8 +1,7 @@
 import os
 import json
-
+import logging
 import pymysql.connections
-# import sqlalchemy
 from sqlalchemy import Column, String, Integer, Boolean, Float, ForeignKey, UniqueConstraint, create_engine
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
@@ -16,7 +15,6 @@ session = None
 
 class Assertion(Model):
     __tablename__ = 'assertion'
-    id = Column(Integer, primary_key=True)
     assertion_id = Column(String(65), primary_key=True)
     subject_curie = Column(String(100), ForeignKey('pr_to_uniprot.pr'))
     object_curie = Column(String(100), ForeignKey('pr_to_uniprot.pr'))
@@ -50,10 +48,10 @@ class Assertion(Model):
         subject_name = 'UNKNOWN_NAME'
         subject_category = 'biolink:NamedThing'
         if self.object_curie in normalized_nodes and normalized_nodes[self.object_curie] is not None:
-            object_name = normalized_nodes[self.object_curie]['id']['label']
+            object_name = normalized_nodes[self.object_curie]['id']['label'] if 'label' in normalized_nodes[self.object_curie]['id'] else self.object_curie
             object_category = 'biolink:ChemicalEntity' if self.object_curie.startswith('CHEBI') else 'biolink:Protein'  # normalized_nodes[object_id]['type'][0]
         if self.subject_curie in normalized_nodes and normalized_nodes[self.subject_curie] is not None:
-            subject_name = normalized_nodes[self.subject_curie]['id']['label']
+            subject_name = normalized_nodes[self.subject_curie]['id']['label'] if 'label' in normalized_nodes[self.subject_curie]['id'] else self.subject_curie
             subject_category = 'biolink:ChemicalEntity' if self.subject_curie.startswith('CHEBI') else 'biolink:Protein'  # normalized_nodes[subject_id]['type'][0]
         return [[self.object_curie, object_name, object_category],
                 [self.subject_curie, subject_name, subject_category]]
@@ -69,10 +67,10 @@ class Assertion(Model):
         subject_category = 'biolink:NamedThing'
 
         if object_id in normalized_nodes and normalized_nodes[object_id] is not None:
-            object_name = normalized_nodes[object_id]['id']['label']
+            object_name = normalized_nodes[object_id]['id']['label'] if 'label' in normalized_nodes[object_id]['id'] else object_id
             object_category = 'biolink:ChemicalEntity' if object_id.startswith('CHEBI') else 'biolink:Protein'  # normalized_nodes[object_id]['type'][0]
         if subject_id in normalized_nodes and normalized_nodes[subject_id] is not None:
-            subject_name = normalized_nodes[subject_id]['id']['label']
+            subject_name = normalized_nodes[subject_id]['id']['label'] if 'label' in normalized_nodes[subject_id]['id'] else subject_id
             subject_category = 'biolink:ChemicalEntity' if subject_id.startswith('CHEBI') else 'biolink:Protein'  # normalized_nodes[subject_id]['type'][0]
         return [[object_id, object_name, object_category],
                 [subject_id, subject_name, subject_category]]
@@ -114,7 +112,7 @@ class Assertion(Model):
             },
             {
                 "attribute_type_id": "biolink:supporting_data_source",
-                "value": "infores:pubmed",  # this will need to come from the db, eventually
+                "value": "infores:pubmed",
                 "value_type_id": "biolink:InformationResource",
                 "attribute_source": "infores:text-mining-provider-targeted"
             },
@@ -472,26 +470,16 @@ class ConceptIDF(Model):
     idf = Column(Float)
 
 
-def init_db(args_object):
+def init_db(instance, user, password, database):
     def get_conn() -> pymysql.connections.Connection:
         conn: pymysql.connections.Connection = connector.connect(
-            os.getenv('MYSQL_DATABASE_INSTANCE', 'lithe-vault-265816:us-central1:text-mined-assertions-stage'),
-            'pymysql',
-            user=args_object.user if args_object.user else os.getenv('MYSQL_DATABASE_USER', None),
-            password=args_object.password if args_object.password else os.getenv('MYSQL_DATABASE_PASSWORD', None),
-            database=args_object.database if args_object.database else 'text_mined_assertions'
+            instance_connection_string=instance,
+            driver='pymysql',
+            user=user,
+            password=password,
+            database=database
         )
         return conn
-    # ip_address = args_object.ip.strip() if args_object.ip else None
-    # url = sqlalchemy.engine.url.URL.create(
-    #         drivername="mysql+pymysql",
-    #         username=args_object.user if args_object.user else os.getenv('MYSQL_DATABASE_USER', None),
-    #         password=args_object.password if args_object.password else os.getenv('MYSQL_DATABASE_PASSWORD', None),
-    #         database=args_object.database if args_object.database else 'text_mined_assertions',
-    #         host=ip_address if ip_address else '34.69.18.127',
-    #         port=3306
-    #     )
-    # engine = create_engine(url, echo=False, future=True)
     engine = create_engine('mysql+pymysql://', creator=get_conn)
     global session
     session = sessionmaker()
