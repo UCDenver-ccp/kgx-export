@@ -19,7 +19,7 @@ class Assertion(Model):
     subject_curie = Column(String(100), ForeignKey('pr_to_uniprot.pr'))
     object_curie = Column(String(100), ForeignKey('pr_to_uniprot.pr'))
     association_curie = Column(String(100))
-    evidence_list = relationship('Evidence', back_populates='assertion')
+    evidence_list = relationship('Evidence', back_populates='assertion', lazy='subquery')
     subject_uniprot = relationship('PRtoUniProt', foreign_keys=subject_curie, lazy='joined')
     object_uniprot = relationship('PRtoUniProt', foreign_keys=object_curie, lazy='joined')
 
@@ -49,10 +49,10 @@ class Assertion(Model):
         subject_category = 'biolink:NamedThing'
         if self.object_curie in normalized_nodes and normalized_nodes[self.object_curie] is not None:
             object_name = normalized_nodes[self.object_curie]['id']['label'] if 'label' in normalized_nodes[self.object_curie]['id'] else self.object_curie
-            object_category = 'biolink:ChemicalEntity' if self.object_curie.startswith('CHEBI') else 'biolink:Protein'  # normalized_nodes[object_id]['type'][0]
+            object_category = normalized_nodes[self.object_curie]['type'][0]
         if self.subject_curie in normalized_nodes and normalized_nodes[self.subject_curie] is not None:
             subject_name = normalized_nodes[self.subject_curie]['id']['label'] if 'label' in normalized_nodes[self.subject_curie]['id'] else self.subject_curie
-            subject_category = 'biolink:ChemicalEntity' if self.subject_curie.startswith('CHEBI') else 'biolink:Protein'  # normalized_nodes[subject_id]['type'][0]
+            subject_category = normalized_nodes[self.subject_curie]['type'][0]
         return [[self.object_curie, object_name, object_category],
                 [self.subject_curie, subject_name, subject_category]]
 
@@ -68,10 +68,10 @@ class Assertion(Model):
 
         if object_id in normalized_nodes and normalized_nodes[object_id] is not None:
             object_name = normalized_nodes[object_id]['id']['label'] if 'label' in normalized_nodes[object_id]['id'] else object_id
-            object_category = 'biolink:ChemicalEntity' if object_id.startswith('CHEBI') else 'biolink:Protein'  # normalized_nodes[object_id]['type'][0]
+            object_category = normalized_nodes[object_id]['type'][0]
         if subject_id in normalized_nodes and normalized_nodes[subject_id] is not None:
             subject_name = normalized_nodes[subject_id]['id']['label'] if 'label' in normalized_nodes[subject_id]['id'] else subject_id
-            subject_category = 'biolink:ChemicalEntity' if subject_id.startswith('CHEBI') else 'biolink:Protein'  # normalized_nodes[subject_id]['type'][0]
+            subject_category = normalized_nodes[subject_id]['type'][0]
         return [[object_id, object_name, object_category],
                 [subject_id, subject_name, subject_category]]
 
@@ -82,6 +82,9 @@ class Assertion(Model):
         relevant_evidence = [ev for ev in self.evidence_list if ev.get_top_predicate() == predicate]
         supporting_study_results = '|'.join([f'tmkp:{ev.evidence_id}' for ev in relevant_evidence])
         supporting_publications = '|'.join([ev.document_id for ev in relevant_evidence])
+        display_predicate = predicate
+        if predicate == 'biolink:gain_of_function_contributes_to' or predicate == 'biolink:loss_of_function_contributes_to':
+            display_predicate = 'biolink:contributes_to'
         return [self.subject_curie, predicate, self.object_curie, self.assertion_id,
                 self.association_curie, self.get_aggregate_score(predicate), supporting_study_results, supporting_publications,
                 self.get_json_attributes(predicate, relevant_evidence)]
@@ -138,6 +141,22 @@ class Assertion(Model):
                 "attribute_source": "infores:pubmed"
             }
         ]
+        if predicate == 'biolink:gain_of_function_contributes_to':
+            attributes_list.append({
+                "attribute_type_id": "biolink:sequence_variant_qualifier",
+                "value": "SO:0002053",
+                "value_type_id": "biolink:SequenceVariant",
+                "description": "Indicates that the gene in this assertion is a gain-of-function variant",
+                "attribute_source": "infores:text-mining-provider-targeted"
+            })
+        if predicate == 'biolink:loss_of_function_contributes_to':
+            attributes_list.append({
+                "attribute_type_id": "biolink:sequence_variant_qualifier",
+                "value": "SO:0002054",
+                "value_type_id": "biolink:SequenceVariant",
+                "description": "Indicates that the gene in this assertion is a loss-of-function variant",
+                "attribute_source": "infores:text-mining-provider-targeted"
+            })
         for study in evidence_list:
             attributes_list.append(study.get_json_attributes())
         return json.dumps(attributes_list)
@@ -188,7 +207,7 @@ class Evidence(Model):
     document_zone = Column(String(45))
     document_publication_type = Column(String(100))
     document_year_published = Column(Integer)
-    evidence_scores = relationship('EvidenceScore', lazy='joined')
+    evidence_scores = relationship('EvidenceScore', lazy='subquery')
 
     def __init__(self, evidence_id, assertion_id, document_id, sentence, subject_entity_id, object_entity_id,
                  document_zone, document_publication_type, document_year_published):
@@ -267,14 +286,14 @@ class Evidence(Model):
                 },
                 {
                     "attribute_type_id": "biolink:subject_location_in_text",
-                    "value": self.subject_entity.span,
+                    "value": self.subject_entity.span if self.subject_entity else '',
                     "value_type_id": "SIO:001056",
                     "description": "The start and end character offsets relative to the sentence for the subject of the assertion represented by the parent edge; start and end offsets are pipe-delimited, discontinuous spans are delimited using commas",
                     "attribute_source": "infores:text-mining-provider-targeted"
                 },
                 {
                     "attribute_type_id": "biolink:object_location_in_text",
-                    "value": self.object_entity.span,
+                    "value": self.object_entity.span if self.object_entity else '',
                     "value_type_id": "SIO:001056",
                     "description": "The start and end character offsets relative to the sentence for the object of the assertion represented by the parent edge; start and end offsets are pipe-delimited, discontinuous spans are delimited using commas",
                     "attribute_source": "infores:text-mining-provider-targeted "
@@ -350,9 +369,9 @@ class Cooccurrence(Model):
 class CooccurrenceScores(Model):
     __tablename__ = 'cooccurrence_scores'
     cooccurrence_id = Column(String(27), ForeignKey('cooccurrence.cooccurrence_id'), ForeignKey('cooccurrence_publication.cooccurrence_id'), primary_key=True)
-    level = Column(String(45), ForeignKey('cooccurrence_publication.level'), primary_key=True)
-    publication_list = relationship('CooccurrencePublication', viewonly=True, uselist=True,
-                                    primaryjoin='and_(CooccurrenceScores.cooccurrence_id == CooccurrencePublication.cooccurrence_id, CooccurrenceScores.level == CooccurrencePublication.level)')
+    level = Column(String(45), primary_key=True)
+    # publication_list = relationship('CooccurrencePublication', viewonly=True, uselist=True,
+    #                                 primaryjoin='and_(CooccurrenceScores.cooccurrence_id == CooccurrencePublication.cooccurrence_id, CooccurrenceScores.level == CooccurrencePublication.level)')
     concept1_count = Column(Integer)
     concept2_count = Column(Integer)
     pair_count = Column(Integer)
@@ -387,6 +406,7 @@ class CooccurrenceScores(Model):
             "attributes": [
                 {
                     "attribute_type_id": "biolink:supporting_document",
+                    # "value": "",
                     "value": '|'.join(f'tmkp:{pub.document_id}' for pub in self.publication_list),
                     "value_type_id": "biolink:Publication",
                     "description": f"The documents where the concepts of this assertion were observed to cooccur at the {self.level} level.",
@@ -480,7 +500,10 @@ def init_db(instance, user, password, database):
             database=database
         )
         return conn
-    engine = create_engine('mysql+pymysql://', creator=get_conn)
+    engine = create_engine('mysql+pymysql://', creator=get_conn, echo=False)
+    # handler = logging.FileHandler('sql.log')
+    # handler.setLevel(logging.DEBUG)
+    # logging.getLogger('sqlalchemy').addHandler(handler)
     global session
     session = sessionmaker()
     session.configure(bind=engine)

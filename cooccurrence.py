@@ -4,6 +4,9 @@ import os
 import sqlalchemy
 import models
 import services
+import json
+
+ROW_BATCH_SIZE = 50000
 
 
 def get_kgx_nodes(curies, normalized_nodes) -> list:
@@ -17,22 +20,47 @@ def get_kgx_nodes(curies, normalized_nodes) -> list:
 
 
 def write_nodes(session, outfile, use_uniprot=False) -> None:
-    # TODO: find out how to page the query in case there is an extreme amount of data
     curie_list = []
     if use_uniprot:
-        entity1_rows = session.query(sqlalchemy.text('entity1_curie, uniprot FROM cooccurrence LEFT JOIN pr_to_uniprot ON entity1_curie = pr'))
-        entity2_rows = session.query(sqlalchemy.text('entity2_curie, uniprot FROM cooccurrence LEFT JOIN pr_to_uniprot ON entity2_curie = pr'))
-        for row in entity1_rows:
-            if row[0].startswith('PR:') and len(row) == 1:
-                continue
-            curie_list.append(row[1] if len(row) > 1 and row[1] else row[0])
-        for row in entity2_rows:
-            if row[0].startswith('PR:') and len(row) == 1:
-                continue
-            curie_list.append(row[1] if len(row) > 1 and row[1] else row[0])
+        unique_curies = []
+        x = 0
+        entity1_curie_query = sqlalchemy.select(sqlalchemy.text('IFNULL(uniprot, entity1_curie) as curie FROM cooccurrence LEFT JOIN pr_to_uniprot ON entity1_curie = pr')).execution_options(stream_results=True)
+        for curie, in session.execute(entity1_curie_query):
+            unique_curies.append(curie)
+            x += 1
+            if x % 100000 == 0:
+                logging.debug(f'x = {x}. Uniquifying')
+                unique_curies = list(set(unique_curies))
+        logging.info(f'Got entity1 curies ({len(unique_curies)})')
+        y = 0
+        entity2_curie_query = sqlalchemy.select(sqlalchemy.text('IFNULL(uniprot, entity2_curie) as curie FROM cooccurrence LEFT JOIN pr_to_uniprot ON entity2_curie = pr')).execution_options(stream_results=True)
+        for curie, in session.execute(entity2_curie_query):
+            unique_curies.append(curie)
+            y += 1
+            if y % 100000 == 0:
+                logging.debug(f'y = {y}. Uniquifying')
+                unique_curies = list(set(unique_curies))
+        curie_list = list(set(unique_curies))
     else:
-        curie_list = [row[0] for row in session.query(sqlalchemy.text('DISTINCT entity1_curie FROM cooccurrence')).all()]
-        curie_list.extend([row[0] for row in session.query(sqlalchemy.text('DISTINCT entity2_curie FROM cooccurrence')).all()])
+        unique_curies = []
+        x = 0
+        entity1_curie_query = sqlalchemy.select(sqlalchemy.text('entity1_curie FROM cooccurrence')).execution_options(stream_results=True)
+        for curie, in session.execute(entity1_curie_query):
+            unique_curies.append(curie)
+            x += 1
+            if x % 100000 == 0:
+                logging.debug(f'x = {x}. Uniquifying')
+                unique_curies = list(set(unique_curies))
+        logging.info(f'Got entity1 curies ({len(unique_curies)})')
+        y = 0
+        entity2_curie_query = sqlalchemy.select(sqlalchemy.text('entity2_curie FROM cooccurrence')).execution_options(stream_results=True)
+        for curie, in session.execute(entity2_curie_query):
+            unique_curies.append(curie)
+            y += 1
+            if y % 100000 == 0:
+                logging.debug(f'y = {y}. Uniquifying')
+                unique_curies = list(set(unique_curies))
+        curie_list = list(set(unique_curies))
     logging.info(f'node curies retrieved ({len(curie_list)})')
     curie_list = list(set(curie_list))
     logging.info(f'unique node curies retrieved ({len(curie_list)})')
@@ -46,19 +74,29 @@ def write_nodes(session, outfile, use_uniprot=False) -> None:
     logging.info('File written')
 
 
-def write_edges(session, outfile, use_uniprot=False) -> None:
-    cooccurrence_list = session.query(models.Cooccurrence).all()
-    logging.info(f'cooccurrence list generated ({len(cooccurrence_list)})')
-    with open(outfile, 'w') as output:
-        for cooccurrence in cooccurrence_list:
-            output.write('\t'.join(cooccurrence.get_edge_kgx(use_uniprot=use_uniprot)) + '\n')
-    logging.info('File written')
+def write_edges(session, file_prefix, bucket, directory, use_uniprot=False) -> None:
+    cooccurrence_count = session.query(models.Cooccurrence).count()
+    file_count = math.ceil(cooccurrence_count / ROW_BATCH_SIZE)
+    logging.info(f"Total Cooccurrence Records: {cooccurrence_count}")
+    logging.info(f"Total File Count: {file_count}")
+    logging.info(f"Mode: {'UniProt' if use_uniprot else 'PR'}")
+    cooccurrence_query = sqlalchemy.select(models.Cooccurrence).execution_options(stream_results=True)
+    x = 0
+    for file_num in range(0,file_count):
+        with open(f"{file_prefix}{file_num}.tsv", "w") as outfile:
+            for cooccurrence, in session.execute(cooccurrence_query.offset(file_num * ROW_BATCH_SIZE).limit(ROW_BATCH_SIZE)):
+                x += 1
+                if x % (ASSERTION_LIMIT / 5) == 0:
+                    logging.info(f'Cooccurrence count: {x}')
+                output.write('\t'.join(cooccurrence.get_edge_kgx(use_uniprot=use_uniprot)) + '\n')
+        logging.info(f"Done writing file {file_prefix}{file_num}.tsv")
+        services.upload_to_gcp(bucket, f"{file_prefix}{file_num}.tsv", f"{directory}{file_prefix}{file_num}.tsv")
+    services.compose_gcp_files(bucket, directory, file_prefix, "cooccurrence_edges.tsv")
+    services.remove_temp_files(bucket, [f"{file_prefix}{num}.tsv" for num in range(0, file_count)])
+    logging.info('edge output complete')
 
 
-def export_all(session):
-    write_nodes(session, 'c_nodes.tsv')
-    write_edges(session, 'c_edges.tsv')
-    logging.info('PR files written')
-    write_nodes(session, 'cu_nodes.tsv', use_uniprot=True)
-    write_edges(session, 'cu_edges.tsv', use_uniprot=True)
-    logging.info("UniProt files written")
+def export_all(session, bucket, blob_prefix, use_uniprot=True):
+    write_nodes(session, 'nodes.tsv', use_uniprot)
+    services.upload_to_gcp(bucket, 'c_nodes.tsv', f'{blob_prefix}cooccurrence_nodes.tsv')
+    write_edges(session, 'c_edges', bucket, blob_prefix, use_uniprot)

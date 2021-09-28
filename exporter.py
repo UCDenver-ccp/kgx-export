@@ -7,26 +7,12 @@ import cooccurrence
 import targeted
 
 
-def upload_all(kg, pr_bucket, uniprot_bucket):
-    if kg == 'targeted' or kg == 'all':
-        services.upload_to_gcp(pr_bucket, 'nodes.tsv', 'kgx/PR/nodes.tsv')
-        services.upload_to_gcp(uniprot_bucket, 'nodes_uniprot.tsv', 'kgx/UniProt/nodes.tsv')
-        services.upload_to_gcp(pr_bucket, 'edges.tsv', 'kgx/PR/edges.tsv')
-        services.upload_to_gcp(uniprot_bucket, 'edges_uniprot.tsv', 'kgx/UniProt/edges.tsv')
-        logging.info('uploaded targeted files')
-    if kg == 'cooccurrence' or kg == 'all':
-        services.upload_to_gcp(pr_bucket, 'c_nodes.tsv', 'kgx/PR/cooccurrence_nodes.tsv')
-        services.upload_to_gcp(uniprot_bucket, 'cu_nodes.tsv', 'kgx/UniProt/cooccurrence_nodes.tsv')
-        services.upload_to_gcp(pr_bucket, 'c_edges.tsv', 'kgx/PR/cooccurrence_edges.tsv')
-        services.upload_to_gcp(uniprot_bucket, 'cu_edges.tsv', 'kgx/UniProt/cooccurrence_edges.tsv')
-        logging.info('uploaded cooccurrence files')
-
-
 if __name__ == "__main__":
     logging.basicConfig(format='%(asctime)s %(module)s:%(funcName)s:%(levelname)s: %(message)s', level=logging.INFO)
-    logging.info('starting main')
+    logging.info('Starting Main')
     parser = argparse.ArgumentParser()
     parser.add_argument('-k', '--knowledgegraph', help='the knowledge graph to export, or all')
+    parser.add_argument('-o', '--ontology', help='the ontology to export, PR or UniProt, or both')
     parser.add_argument('-i', '--instance', help='GCP DB instance name')
     parser.add_argument('-d', '--database', help='database name')
     parser.add_argument('-u', '--user', help='database username')
@@ -45,9 +31,10 @@ if __name__ == "__main__":
     )
     session = models.session()
     if args.knowledgegraph == 'cooccurrence' or args.knowledgegraph == 'all':
-        cooccurrence.export_all(session)
+        if (args.ontology and (args.ontology.lower() == 'uniprot' or args.ontology.lower() == 'both')) or not args.ontology:
+            cooccurrence.export_all(session, uniprot_bucket, 'kgx/UniProt/', use_uniprot=True)
+        if (args.ontology and (args.ontology.lower() == 'pr' or args.ontology.lower() == 'both')) or not args.ontology:
+            cooccurrence.export_all(session, pr_bucket, 'kgx/PR/', use_uniprot=False)
     if args.knowledgegraph == 'targeted' or args.knowledgegraph == 'all':
-        targeted.export_all(session)
-    upload_all(args.knowledgegraph, pr_bucket, uniprot_bucket)
-    logging.info("Files uploaded Main")
+        targeted.export_all(session, pr_bucket, uniprot_bucket, args.ontology)
     logging.info("End Main")
