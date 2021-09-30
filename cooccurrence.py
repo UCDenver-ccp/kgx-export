@@ -21,46 +21,48 @@ def get_kgx_nodes(curies, normalized_nodes) -> list:
 
 def write_nodes(session, outfile, use_uniprot=False) -> None:
     curie_list = []
+    unique_curies = []
+    x = 0
     if use_uniprot:
-        unique_curies = []
-        x = 0
-        entity1_curie_query = sqlalchemy.select(sqlalchemy.text('IFNULL(uniprot, entity1_curie) as curie FROM cooccurrence LEFT JOIN pr_to_uniprot ON entity1_curie = pr')).execution_options(stream_results=True)
-        for curie, in session.execute(entity1_curie_query):
-            unique_curies.append(curie)
-            x += 1
-            if x % 100000 == 0:
-                logging.debug(f'x = {x}. Uniquifying')
-                unique_curies = list(set(unique_curies))
-        logging.info(f'Got entity1 curies ({len(unique_curies)})')
-        y = 0
-        entity2_curie_query = sqlalchemy.select(sqlalchemy.text('IFNULL(uniprot, entity2_curie) as curie FROM cooccurrence LEFT JOIN pr_to_uniprot ON entity2_curie = pr')).execution_options(stream_results=True)
-        for curie, in session.execute(entity2_curie_query):
-            unique_curies.append(curie)
-            y += 1
-            if y % 100000 == 0:
-                logging.debug(f'y = {y}. Uniquifying')
-                unique_curies = list(set(unique_curies))
-        curie_list = list(set(unique_curies))
+        entity1_curie_query = sqlalchemy.select(sqlalchemy.text(
+            """
+            IFNULL(uniprot, entity1_curie) as curie 
+            FROM cooccurrence 
+                LEFT JOIN pr_to_uniprot ON entity1_curie = pr
+            """
+        ))
     else:
-        unique_curies = []
-        x = 0
-        entity1_curie_query = sqlalchemy.select(sqlalchemy.text('entity1_curie FROM cooccurrence')).execution_options(stream_results=True)
-        for curie, in session.execute(entity1_curie_query):
-            unique_curies.append(curie)
-            x += 1
-            if x % 100000 == 0:
-                logging.debug(f'x = {x}. Uniquifying')
-                unique_curies = list(set(unique_curies))
-        logging.info(f'Got entity1 curies ({len(unique_curies)})')
-        y = 0
-        entity2_curie_query = sqlalchemy.select(sqlalchemy.text('entity2_curie FROM cooccurrence')).execution_options(stream_results=True)
-        for curie, in session.execute(entity2_curie_query):
-            unique_curies.append(curie)
-            y += 1
-            if y % 100000 == 0:
-                logging.debug(f'y = {y}. Uniquifying')
-                unique_curies = list(set(unique_curies))
-        curie_list = list(set(unique_curies))
+        entity1_curie_query = sqlalchemy.select(sqlalchemy.text(
+            """entity1_curie FROM cooccurrence"""
+        ))
+
+    for curie, in session.execute(entity1_curie_query.execution_options(stream_results=True)):
+        unique_curies.append(curie)
+        x += 1
+        if x % 100000 == 0:
+            logging.debug(f'x = {x}. Uniquifying')
+            unique_curies = list(set(unique_curies))
+    logging.info(f'Got unique entity1 curies ({len(unique_curies)})')
+    y = 0
+    if use_uniprot:
+        entity2_curie_query = sqlalchemy.select(sqlalchemy.text(
+            """
+            IFNULL(uniprot, entity2_curie) as curie 
+            FROM cooccurrence 
+            LEFT JOIN pr_to_uniprot ON entity2_curie = pr
+            """
+        ))
+    else:
+        entity2_curie_query = sqlalchemy.select(sqlalchemy.text(
+            """entity2_curie FROM cooccurrence"""
+        ))
+    for curie, in session.execute(entity2_curie_query.execution_options(stream_results=True)):
+        unique_curies.append(curie)
+        y += 1
+        if y % 100000 == 0:
+            logging.debug(f'y = {y}. Uniquifying')
+            unique_curies = list(set(unique_curies))
+    curie_list = list(set(unique_curies))
     logging.info(f'node curies retrieved ({len(curie_list)})')
     curie_list = list(set(curie_list))
     logging.info(f'unique node curies retrieved ({len(curie_list)})')

@@ -1,6 +1,8 @@
 import http.client
 import json
 import logging
+import os
+
 from google.cloud import storage
 
 
@@ -34,7 +36,7 @@ def get_normalized_nodes_by_parts(curie_list, sublist_size=1000) -> dict:
     logging.info(f'Final total: {len(nodes.keys())} nodes')
     return nodes
 
-def upload_to_gcp(bucket_name, source_file_name, destination_blob_name):
+def upload_to_gcp(bucket_name, source_file_name, destination_blob_name, delete_source_file=False):
     """
     Upload a file to the specified GCP Bucket with the given blob name.
 
@@ -47,6 +49,8 @@ def upload_to_gcp(bucket_name, source_file_name, destination_blob_name):
     logging.info(f'Uploading {source_file_name} to {destination_blob_name}')
     blob = bucket.blob(destination_blob_name)
     blob.upload_from_filename(source_file_name, timeout=300, num_retries=2)
+    if blob.exists() and os.isfile(source_file_name) and delete_source_file:
+        os.remove(source_file_name)
 
 
 def compose_gcp_files(bucket_name, directory, file_prefix, new_file_name):
