@@ -1,11 +1,10 @@
 import logging
-import argparse
 import os
-import services
-import models
-import cooccurrence
-import targeted
 
+import argparse
+import cooccurrence
+import models
+import targeted
 
 if __name__ == "__main__":
     logging.basicConfig(format='%(asctime)s %(module)s:%(funcName)s:%(levelname)s: %(message)s', level=logging.INFO)
@@ -17,12 +16,19 @@ if __name__ == "__main__":
     parser.add_argument('-d', '--database', help='database name')
     parser.add_argument('-u', '--user', help='database username')
     parser.add_argument('-p', '--password', help='database password')
-    parser.add_argument('-pr', help='storage bucket for PR data')
-    parser.add_argument('-uni', help='storage bucket for UniProt data')
+    parser.add_argument('-pr', '--pr_bucket', help='storage bucket for PR data')
+    parser.add_argument('-uni', '--uniprot_bucket', help='storage bucket for UniProt data')
+    parser.add_argument('-l', '--limit', help='maximum number of publications to export per edge', default=0, type=int)
+    parser.add_argument('-v', '--verbose', action='store_true')
     args = parser.parse_args()
-    pr_bucket = args.pr if args.pr else 'test_kgx_output_bucket'
-    uniprot_bucket = args.uni if args.uni else 'test_kgx_output_bucket'
-    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'prod-creds.json'
+
+    pr_bucket = args.pr_bucket if args.pr_bucket else 'test_kgx_output_bucket'
+    uniprot_bucket = args.uniprot_bucket if args.uniprot_bucket else 'test_kgx_output_bucket'
+    kg = args.knowledgegraph.lower() if args.knowledgegraph else 'all'
+    ontology = args.ontology.lower() if args.ontology else 'both'
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+
     models.init_db(
         instance=args.instance if args.instance else os.getenv('MYSQL_DATABASE_INSTANCE', None),
         user=args.user if args.user else os.getenv('MYSQL_DATABASE_USER', None),
@@ -30,11 +36,21 @@ if __name__ == "__main__":
         database=args.database if args.database else 'text_mined_assertions'
     )
     session = models.session()
-    if args.knowledgegraph == 'cooccurrence' or args.knowledgegraph == 'all':
-        if (args.ontology and (args.ontology.lower() == 'uniprot' or args.ontology.lower() == 'both')) or not args.ontology:
-            cooccurrence.export_all(session, uniprot_bucket, 'kgx/UniProt/', use_uniprot=True)
-        if (args.ontology and (args.ontology.lower() == 'pr' or args.ontology.lower() == 'both')) or not args.ontology:
-            cooccurrence.export_all(session, pr_bucket, 'kgx/PR/', use_uniprot=False)
+
+    if kg == 'cooccurrence' or kg == 'all':
+        logging.info("Exporting Cooccurrence knowledge graph")
+        if ontology == 'uniprot' or ontology == 'both':
+            logging.info("Exporting UniProt")
+            cooccurrence.export_kg(session, uniprot_bucket, 'kgx/UniProt/', use_uniprot=True)
+        if ontology == 'pr' or ontology == 'both':
+            logging.info("Exporting PR")
+            cooccurrence.export_kg(session, pr_bucket, 'kgx/PR/', use_uniprot=False)
     if args.knowledgegraph == 'targeted' or args.knowledgegraph == 'all':
-        targeted.export_all(session, pr_bucket, uniprot_bucket, args.ontology)
+        logging.info("Exporting Targeted Assertion knowledge graph")
+        if ontology == 'uniprot' or ontology == 'both':
+            logging.info("Exporting UniProt")
+            targeted.export_kg(session, uniprot_bucket, 'kgx/UniProt/', use_uniprot=True, edge_limit=args.limit)
+        if ontology == 'pr' or ontology == 'both':
+            logging.info("Exporting PR")
+            targeted.export_kg(session, pr_bucket, 'kgx/PR/', use_uniprot=False, edge_limit=args.limit)
     logging.info("End Main")

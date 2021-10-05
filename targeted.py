@@ -1,18 +1,22 @@
-import sqlalchemy
-import os
+import gzip
+import logging
+import math
+from typing import Iterator
+
 import models
 import services
-import argparse
-import logging
-from sqlalchemy.orm import joinedload
-from google.cloud import storage
-from datetime import datetime, timezone
-import math
+import sqlalchemy
 
-ASSERTION_LIMIT = 50000
+ROW_BATCH_SIZE = 50000
 
 
-def get_kgx_nodes(curies, normalized_nodes) -> list:
+def get_kgx_nodes(curies: list[str], normalized_nodes:dict[str, dict]) -> Iterator[list[str]]:
+    """
+    Get the KGX node representation of a curie
+
+    :param curies: the list of curies to turn into KGX nodes
+    :param normalized_nodes: a dictionary of normalized nodes, for retrieving canonical label and category
+    """
     for curie in curies:
         name = 'UNKNOWN_NAME'
         category = 'biolink:NamedThing'
@@ -22,96 +26,84 @@ def get_kgx_nodes(curies, normalized_nodes) -> list:
         yield [curie, name, category]
 
 
-def get_nodes(session, output_filename) -> None:
+def write_nodes_compressed(session: sqlalchemy.orm.Session, output_filename: str, use_uniprot: bool=False) -> None:
     """
-    Get the subject and object curies from assertions, normalize and uniquify them, and then output to a TSV file.
+    Get the subject and object curies from assertions, normalize and uniquify them, and then output to a gzipped TSV file according to KGX node format.
 
-    :param output_filename: filepath for the output TSV file in KGX format.
+    :param session: the database session.
+    :param output_filename: filepath for the output file.
+    :param use_uniprot: whether to translate the PR curies to UniProt (curies with no UniProt equivalent will be excluded)
     """
-    curies = [row[0] for row in session.query(sqlalchemy.text('DISTINCT subject_curie FROM assertion')).all()]
-    curies.extend([row[0] for row in session.query(sqlalchemy.text('DISTINCT object_curie FROM assertion')).all()])
+    logging.info("Starting node output")
+    logging.info(f"Mode: {'UniProt' if use_uniprot else 'PR'}")
+    if use_uniprot:
+        curies = [row[0] for row in session.query(sqlalchemy.text('DISTINCT IFNULL(uniprot, subject_curie) as curie FROM assertion LEFT JOIN pr_to_uniprot ON subject_curie = pr')).all()]
+        curies.extend([row[0] for row in session.query(sqlalchemy.text('DISTINCT IFNULL(uniprot, object_curie) as curie FROM assertion LEFT JOIN pr_to_uniprot ON object_curie = pr')).all()])
+    else:
+        curies = [row[0] for row in session.query(sqlalchemy.text('DISTINCT subject_curie FROM assertion')).all()]
+        curies.extend([row[0] for row in session.query(sqlalchemy.text('DISTINCT object_curie FROM assertion')).all()])
     curies = list(set(curies))
-    logging.info(f'node curies retrieved and uniquified ({len(curies)})')
+    logging.debug(f'node curies retrieved and uniquified ({len(curies)})')
+    if use_uniprot:
+        curies = [curie for curie in curies if not curie.startswith('PR:')]
     if len(curies) > 10000:
         normalized_nodes = services.get_normalized_nodes_by_parts(curies)
     else:
         normalized_nodes = services.get_normalized_nodes(curies)
-    with open(output_filename, 'w') as outfile:
+    with gzip.open(output_filename, 'wb') as outfile:
         for node in get_kgx_nodes(curies, normalized_nodes):
-            outfile.write('\t'.join(node) + '\n')
-    logging.info('node output complete')
+            line = '\t'.join(node) + '\n'
+            outfile.write(line.encode('utf-8'))
+    logging.info('Node output complete')
 
 
-def get_uniprot_nodes(session, output_filename) -> None:
+def write_edges_compressed(session: sqlalchemy.orm.Session, output_filename: str, use_uniprot: bool=False, limit: int=0) -> None:
     """
-    Get the subject and object curies from assertions (using the UniProt names where available),
-    normalize and uniquify them, and then output to a TSV file in KGX format.
+    Get the edge (or edges) associated with each assertion and output them to a gzipped TSV file according to KGX edge format.
 
-    :param output_filename: filepath for the output TSV file.
+    :param session: the database session.
+    :param output_filename: filepath for the output file.
+    :param use_uniprot: whether to translate the PR curies to UniProt (curies with no UniProt equivalent will be excluded)
+    :param limit: the maximum number of supporting study results per edge to include in the JSON blob (0 is no limit)
     """
-    curies = [row[0] for row in session.query(sqlalchemy.text('DISTINCT IFNULL(uniprot, subject_curie) as curie FROM assertion LEFT JOIN pr_to_uniprot ON subject_curie = pr')).all()]
-    curies.extend([row[0] for row in session.query(sqlalchemy.text('DISTINCT IFNULL(uniprot, object_curie) as curie FROM assertion LEFT JOIN pr_to_uniprot ON object_curie = pr')).all()])
-    curies = list(set(curies))
-    logging.info(f'translated node curies retrieved ({len(curies)})')
-    curies = [curie for curie in curies if not curie.startswith('PR:')]
-    logging.info(f'removed PR curies, leaving {len(curies)}')
-    if len(curies) > 10000:
-        normalized_nodes = services.get_normalized_nodes_by_parts(curies)
-    else:
-        normalized_nodes = services.get_normalized_nodes(curies)
-    with open(output_filename, 'w') as outfile:
-        for node in get_kgx_nodes(curies, normalized_nodes):
-            outfile.write('\t'.join(node) + '\n')
-    logging.info('node output complete')
-
-
-def get_edges(session, file_prefix, bucket, directory, pr=True):
-    """
-    Get the edge (or edges) associated with each assertion and output them to a TSV file in KGX edge format.
-
-    :param session: the SQLAlchemy session to use to query the database
-    :param output_filename: filepath for the output TSV file
-    """
+    logging.info("Starting edge output")
+    logging.info(f"Mode: {'UniProt' if use_uniprot else 'PR'}")
     evaluation_subquery = session.query(sqlalchemy.text('DISTINCT(assertion_id) FROM evaluation WHERE overall_correct = 0'))
     assertion_count = session.query(models.Assertion).filter(models.Assertion.assertion_id.notin_(evaluation_subquery)).count()
-    file_count = math.ceil(assertion_count / ASSERTION_LIMIT)
-    logging.info(f"Total Assertions: {assertion_count}")
-    logging.info(f"Total File Count: {file_count}")
-    logging.info(f"Mode: {'PR' if pr else 'UniProt'}")
+    partition_count = math.ceil(assertion_count / ROW_BATCH_SIZE)
+    logging.debug(f"Total Assertions: {assertion_count}")
+    logging.debug(f"Total Partition Count: {partition_count}")
     assertion_query = sqlalchemy.select(models.Assertion)\
         .filter(models.Assertion.assertion_id.notin_(evaluation_subquery))\
         .execution_options(stream_results=True)
-    x = 0
-    for file_num in range(0,file_count):
-        with open(f"{file_prefix}{file_num}.tsv", "w") as outfile:
-            for assertion, in session.execute(assertion_query.offset(file_num * ASSERTION_LIMIT).limit(ASSERTION_LIMIT)):
-                x += 1
-                if x % (ASSERTION_LIMIT / 5) == 0:
-                    logging.debug(f'Assertion count: {x}')
-                if pr:
-                    edges = assertion.get_edges_kgx()
+    with gzip.open(output_filename, 'wb') as outfile:
+        for partition_number in range(0, partition_count):
+            for assertion, in session.execute(assertion_query.offset(partition_number * ROW_BATCH_SIZE).limit(ROW_BATCH_SIZE)):
+                if use_uniprot:
+                    edges = assertion.get_other_edges_kgx(limit)
                 else:
-                    edges = assertion.get_other_edges_kgx()
+                    edges = assertion.get_edges_kgx(limit)
                 for edge in edges:
                     if len(edge) == 0:
                         continue
-                    outfile.write('\t'.join(str(val) for val in edge))
-                    outfile.write('\n')
-        logging.info(f"Done writing file {file_prefix}{file_num}.tsv")
-        services.upload_to_gcp(bucket, f"{file_prefix}{file_num}.tsv", f"{directory}{file_prefix}{file_num}.tsv")
-    services.compose_gcp_files(bucket, directory, file_prefix, "edges.tsv")
-    services.remove_temp_files(bucket, [f"{file_prefix}{num}.tsv" for num in range(0, file_count)])
-    logging.info(f"{'PR' if pr else 'UniProt'} edge output complete")
+                    line = '\t'.join(str(val) for val in edge) + '\n'
+                    outfile.write(line.encode('utf-8'))
+            outfile.flush()
+            logging.debug(f"Done with partition {partition_number}")
+    logging.info("Edge output complete")
 
 
-def export_all(session, pr_bucket, uniprot_bucket, ontology=None):
-    logging.info("Starting export of Targeted Assertions")
-    if (ontology and (ontology.lower() == 'uniprot' or ontology.lower() == 'both')) or not ontology:
-        get_uniprot_nodes(session, "nodes_uniprot.tsv")
-        services.upload_to_gcp(uniprot_bucket, 'nodes_uniprot.tsv', 'kgx/UniProt/nodes.tsv')
-        get_edges(session, "edges", uniprot_bucket, "kgx/UniProt/", False)
-    if (ontology and (ontology.lower() == 'pr' or ontology.lower() == 'both')) or not ontology:
-        get_nodes(session, "nodes.tsv")
-        services.upload_to_gcp(pr_bucket, 'nodes.tsv', 'kgx/PR/nodes.tsv')
-        get_edges(session, "edges", pr_bucket, "kgx/PR/", True)
-    logging.info("Targeted Assertions export complete")
+def export_kg(session: sqlalchemy.orm.Session, bucket: str, blob_prefix: str, use_uniprot: bool=False, edge_limit: int=0) -> None:
+    """
+    Create and upload the node and edge KGX files for targeted assertions.
+
+    :param session: the database session
+    :param bucket: the output GCP bucket name
+    :param blob_prefix: the directory prefix for the uploaded files
+    :param use_uniprot: whether to translate the PR curies to UniProt (curies with no UniProt equivalent will be excluded)
+    :param edge_limit: the maximum number of supporting study results per edge to include in the JSON blob (0 is no limit)
+    """
+    write_nodes_compressed(session, "nodes.tsv.gz", use_uniprot=use_uniprot)
+    services.upload_to_gcp(bucket, 'nodes.tsv.gz', f"{blob_prefix}nodes.tsv.gz")
+    write_edges_compressed(session, "edges.tsv.gz", use_uniprot=use_uniprot, limit=edge_limit)
+    services.upload_to_gcp(bucket, 'edges.tsv.gz', f"{blob_prefix}edges.tsv.gz")

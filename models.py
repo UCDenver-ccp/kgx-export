@@ -1,13 +1,12 @@
-import os
 import json
-import logging
-import pymysql.connections
-from sqlalchemy import Column, String, Integer, Boolean, Float, ForeignKey, UniqueConstraint, create_engine
-from sqlalchemy.orm import relationship
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
 from math import fsum
+
+import pymysql.connections
 from google.cloud.sql.connector import connector
+from sqlalchemy import Column, String, Integer, Boolean, Float, ForeignKey, UniqueConstraint, create_engine
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import relationship
+from sqlalchemy.orm import sessionmaker
 
 Model = declarative_base(name='Model')
 session = None
@@ -75,11 +74,13 @@ class Assertion(Model):
         return [[object_id, object_name, object_category],
                 [subject_id, subject_name, subject_category]]
 
-    def get_edges_kgx(self) -> list:
-        return [self.get_edge_kgx(predicate) for predicate in self.get_predicates()]
+    def get_edges_kgx(self, limit=0) -> list:
+        return [self.get_edge_kgx(predicate, limit) for predicate in self.get_predicates()]
 
-    def get_edge_kgx(self, predicate) -> list:
+    def get_edge_kgx(self, predicate, limit=0) -> list:
         relevant_evidence = [ev for ev in self.evidence_list if ev.get_top_predicate() == predicate]
+        if limit > 0:
+            relevant_evidence = relevant_evidence[:limit]
         supporting_study_results = '|'.join([f'tmkp:{ev.evidence_id}' for ev in relevant_evidence])
         supporting_publications = '|'.join([ev.document_id for ev in relevant_evidence])
         display_predicate = predicate
@@ -89,15 +90,17 @@ class Assertion(Model):
                 self.association_curie, self.get_aggregate_score(predicate), supporting_study_results, supporting_publications,
                 self.get_json_attributes(predicate, relevant_evidence)]
 
-    def get_other_edges_kgx(self) -> list:
-        return [self.get_other_edge_kgx(predicate) for predicate in self.get_predicates()]
+    def get_other_edges_kgx(self, limit=0) -> list:
+        return [self.get_other_edge_kgx(predicate, limit) for predicate in self.get_predicates()]
 
-    def get_other_edge_kgx(self, predicate):
+    def get_other_edge_kgx(self, predicate, limit=0):
         if (self.object_curie.startswith('PR:') and not self.object_uniprot) or (self.subject_curie.startswith('PR:') and not self.subject_uniprot):
             return []
         subject_id = self.subject_uniprot.uniprot if self.subject_uniprot else self.subject_curie
         object_id = self.object_uniprot.uniprot if self.object_uniprot else self.object_curie
         relevant_evidence = [ev for ev in self.evidence_list if ev.get_top_predicate() == predicate]
+        if limit > 0:
+            relevant_evidence = relevant_evidence[:limit]
         supporting_study_results = '|'.join([f'tmkp:{ev.evidence_id}' for ev in relevant_evidence])
         supporting_publications = '|'.join([ev.document_id for ev in relevant_evidence])
         return [subject_id, predicate, object_id, self.assertion_id, self.association_curie,
@@ -330,17 +333,22 @@ class Cooccurrence(Model):
     __tablename__ = 'cooccurrence'
     cooccurrence_id = Column(String(27), primary_key=True)
     entity1_curie = Column(String(100))
-    entity1_uniprot = relationship('PRtoUniProt', viewonly=True, uselist=False, primaryjoin='Cooccurrence.entity1_curie == PRtoUniProt.pr')
+    entity1_uniprot = relationship('PRtoUniProt', viewonly=True, uselist=False, primaryjoin='Cooccurrence.entity1_curie == PRtoUniProt.pr', lazy='joined')
     entity2_curie = Column(String(45))
-    entity2_uniprot = relationship('PRtoUniProt', viewonly=True, uselist=False, primaryjoin='Cooccurrence.entity2_curie == PRtoUniProt.pr')
-    scores_list = relationship('CooccurrenceScores', primaryjoin='Cooccurrence.cooccurrence_id == CooccurrenceScores.cooccurrence_id')
+    entity2_uniprot = relationship('PRtoUniProt', viewonly=True, uselist=False, primaryjoin='Cooccurrence.entity2_curie == PRtoUniProt.pr', lazy='joined')
+    scores_list = relationship('CooccurrenceScores', primaryjoin='Cooccurrence.cooccurrence_id == CooccurrenceScores.cooccurrence_id', lazy='subquery')
+
+    def __init__(self, cooccurrence_id, entity1_curie, entity2_curie):
+        self.cooccurrence_id = cooccurrence_id
+        self.entity1_curie = entity1_curie
+        self.entity2_curie = entity2_curie
 
     def get_edge_kgx(self, use_uniprot=False) -> list:
         if use_uniprot:
             if (self.entity1_curie.startswith('PR:') and not self.entity1_uniprot) or (self.entity2_curie.startswith('PR:') and not self.entity2_uniprot):
                 return []
-        entity1 = self.entity1_uniprot if use_uniprot and self.entity1_uniprot else self.entity1_curie
-        entity2 = self.entity2_uniprot if use_uniprot and self.entity2_uniprot else self.entity2_curie
+        entity1 = self.entity1_uniprot.uniprot if use_uniprot and self.entity1_uniprot else self.entity1_curie
+        entity2 = self.entity2_uniprot.uniprot if use_uniprot and self.entity2_uniprot else self.entity2_curie
         supporting_study_results = '|'.join(f'tmkp:{sco.cooccurrence_id}_{sco.level}' for sco in self.scores_list)
         return [entity1, 'biolink:related_to', entity2, self.cooccurrence_id,
                 'biolink:Association', supporting_study_results, json.dumps(self.get_json_attributes())]
@@ -369,9 +377,9 @@ class Cooccurrence(Model):
 class CooccurrenceScores(Model):
     __tablename__ = 'cooccurrence_scores'
     cooccurrence_id = Column(String(27), ForeignKey('cooccurrence.cooccurrence_id'), ForeignKey('cooccurrence_publication.cooccurrence_id'), primary_key=True)
-    level = Column(String(45), primary_key=True)
-    # publication_list = relationship('CooccurrencePublication', viewonly=True, uselist=True,
-    #                                 primaryjoin='and_(CooccurrenceScores.cooccurrence_id == CooccurrencePublication.cooccurrence_id, CooccurrenceScores.level == CooccurrencePublication.level)')
+    level = Column(String(45), ForeignKey('cooccurrence_publication.level'), primary_key=True)
+    publication_list = relationship('CooccurrencePublication', viewonly=True, uselist=True,
+                                    primaryjoin='and_(CooccurrenceScores.cooccurrence_id == CooccurrencePublication.cooccurrence_id, CooccurrenceScores.level == CooccurrencePublication.level)', lazy='joined')
     concept1_count = Column(Integer)
     concept2_count = Column(Integer)
     pair_count = Column(Integer)
@@ -381,6 +389,19 @@ class CooccurrenceScores(Model):
     pmi_norm_max = Column(Float)
     mutual_dependence = Column(Float)
     lfmd = Column(Float)
+
+    def __init__(self, cooccurrence_id, level, concept1_count, concept2_count, pair_count, ngd, pmi, pmi_norm, pmi_norm_max, mutual_dependence, lfmd):
+        self.cooccurrence_id = cooccurrence_id
+        self.level = level
+        self.concept1_count = concept1_count
+        self.concept2_count = concept2_count
+        self.pair_count = pair_count
+        self.ngd = ngd
+        self.pmi = pmi
+        self.pmi_norm = pmi_norm
+        self.pmi_norm_max = pmi_norm_max
+        self.mutual_dependence = mutual_dependence
+        self.lfmd = lfmd
 
     def get_json_attributes(self) -> dict:
         biolink_level = 'biolink:DocumentLevelConceptCooccurrenceAnalysisResult'
@@ -406,7 +427,6 @@ class CooccurrenceScores(Model):
             "attributes": [
                 {
                     "attribute_type_id": "biolink:supporting_document",
-                    # "value": "",
                     "value": '|'.join(f'tmkp:{pub.document_id}' for pub in self.publication_list),
                     "value_type_id": "biolink:Publication",
                     "description": f"The documents where the concepts of this assertion were observed to cooccur at the {self.level} level.",
@@ -482,6 +502,11 @@ class CooccurrencePublication(Model):
     level = Column(String(45), ForeignKey('cooccurrence_scores.level'), primary_key=True)
     document_id = Column(String(45), primary_key=True)
 
+    def __init__(self, cooccurrence_id, level, document_id):
+        self.cooccurrence_id = cooccurrence_id
+        self.level = level
+        self.document_id = document_id
+
 
 class ConceptIDF(Model):
     __tablename__ = 'concept_idf'
@@ -489,8 +514,13 @@ class ConceptIDF(Model):
     level = Column(String(45), primary_key=True)
     idf = Column(Float)
 
+    def __init__(self, concept_curie, level, idf):
+        self.concept_curie = concept_curie
+        self.level = level
+        self.idf = idf
 
-def init_db(instance, user, password, database):
+
+def init_db(instance: str, user: str, password: str, database: str) -> None:
     def get_conn() -> pymysql.connections.Connection:
         conn: pymysql.connections.Connection = connector.connect(
             instance_connection_string=instance,
@@ -501,9 +531,6 @@ def init_db(instance, user, password, database):
         )
         return conn
     engine = create_engine('mysql+pymysql://', creator=get_conn, echo=False)
-    # handler = logging.FileHandler('sql.log')
-    # handler.setLevel(logging.DEBUG)
-    # logging.getLogger('sqlalchemy').addHandler(handler)
     global session
     session = sessionmaker()
     session.configure(bind=engine)

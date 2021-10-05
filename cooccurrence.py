@@ -1,15 +1,22 @@
+import gzip
 import logging
-import argparse
-import os
-import sqlalchemy
+import math
+from typing import Iterator
+
 import models
 import services
-import json
+import sqlalchemy
 
 ROW_BATCH_SIZE = 50000
 
 
-def get_kgx_nodes(curies, normalized_nodes) -> list:
+def get_kgx_nodes(curies: list[str], normalized_nodes:dict[str, dict]) -> Iterator[list[str]]:
+    """
+    Get the KGX node representation of a curie
+
+    :param curies: the list of curies to turn into KGX nodes
+    :param normalized_nodes: a dictionary of normalized nodes, for retrieving canonical label and category
+    """
     for curie in curies:
         name = 'UNKNOWN_NAME'
         category = 'biolink:NamedThing'
@@ -19,10 +26,18 @@ def get_kgx_nodes(curies, normalized_nodes) -> list:
         yield [curie, name, category]
 
 
-def write_nodes(session, outfile, use_uniprot=False) -> None:
-    curie_list = []
-    unique_curies = []
-    x = 0
+def write_nodes_compressed(session: sqlalchemy.orm.Session, outfile: str, use_uniprot: bool=False) -> None:
+    """
+    Get the subject and object curies from cooccurrences, normalize and uniquify them, and then output to a gzipped TSV file according to KGX node format.
+
+    :param session: the database session.
+    :param output_filename: filepath for the output file.
+    :param use_uniprot: whether to translate the PR curies to UniProt (curies with no UniProt equivalent will be excluded)
+    """
+    logging.info("Starting node export")
+    logging.info(f"Mode: {'UniProt' if use_uniprot else 'PR'}")
+    curies = []
+    curies = []
     if use_uniprot:
         entity1_curie_query = sqlalchemy.select(sqlalchemy.text(
             """
@@ -37,13 +52,10 @@ def write_nodes(session, outfile, use_uniprot=False) -> None:
         ))
 
     for curie, in session.execute(entity1_curie_query.execution_options(stream_results=True)):
-        unique_curies.append(curie)
-        x += 1
-        if x % 100000 == 0:
-            logging.debug(f'x = {x}. Uniquifying')
-            unique_curies = list(set(unique_curies))
-    logging.info(f'Got unique entity1 curies ({len(unique_curies)})')
-    y = 0
+        curies.append(curie)
+        if len(curies) % 50000 == 0:
+            curies = list(set(curies))
+    logging.debug(f'Got unique entity1 curies ({len(curies)})')
     if use_uniprot:
         entity2_curie_query = sqlalchemy.select(sqlalchemy.text(
             """
@@ -57,48 +69,59 @@ def write_nodes(session, outfile, use_uniprot=False) -> None:
             """entity2_curie FROM cooccurrence"""
         ))
     for curie, in session.execute(entity2_curie_query.execution_options(stream_results=True)):
-        unique_curies.append(curie)
-        y += 1
-        if y % 100000 == 0:
-            logging.debug(f'y = {y}. Uniquifying')
-            unique_curies = list(set(unique_curies))
-    curie_list = list(set(unique_curies))
-    logging.info(f'node curies retrieved ({len(curie_list)})')
-    curie_list = list(set(curie_list))
-    logging.info(f'unique node curies retrieved ({len(curie_list)})')
-    if len(curie_list) > 10000:
-        normalized_nodes = services.get_normalized_nodes_by_parts(curie_list)
+        curies.append(curie)
+        if len(curies) % 50000 == 0:
+            curies = list(set(curies))
+    curies = list(set(curies))
+    logging.debug(f'unique node curies retrieved and uniquified ({len(curies)})')
+    if use_uniprot:
+        curies = [curie for curie in curies if not curie.startswith('PR:')]
+    if len(curies) > 10000:
+        normalized_nodes = services.get_normalized_nodes_by_parts(curies, sublist_size=5000)
     else:
-        normalized_nodes = services.get_normalized_nodes(curie_list)
-    with open(outfile, 'w') as output:
-        for node in get_kgx_nodes(curie_list, normalized_nodes):
-            output.write('\t'.join(node) + '\n')
-    logging.info('File written')
+        normalized_nodes = services.get_normalized_nodes(curies)
+    with gzip.open(outfile, 'wb') as output:
+        for node in get_kgx_nodes(curies, normalized_nodes):
+            line = '\t'.join(node) + '\n'
+            output.write(line.encode('utf-8'))
+    logging.info('Node output complete')
 
 
-def write_edges(session, file_prefix, bucket, directory, use_uniprot=False) -> None:
-    cooccurrence_count = session.query(models.Cooccurrence).count()
-    file_count = math.ceil(cooccurrence_count / ROW_BATCH_SIZE)
-    logging.info(f"Total Cooccurrence Records: {cooccurrence_count}")
-    logging.info(f"Total File Count: {file_count}")
+def write_edges_compressed(session: sqlalchemy.orm.Session, output_filename: str, use_uniprot: bool=False) -> None:
+    """
+    Get the edge (or edges) associated with each assertion and output them to a gzipped TSV file according to KGX edge format.
+
+    :param session: the database session.
+    :param output_filename: filepath for the output file.
+    :param use_uniprot: whether to translate the PR curies to UniProt (curies with no UniProt equivalent will be excluded)
+    """
+    logging.info('Starting edge output')
     logging.info(f"Mode: {'UniProt' if use_uniprot else 'PR'}")
+    cooccurrence_count = session.query(models.Cooccurrence).count()
+    partition_count = math.ceil(cooccurrence_count / ROW_BATCH_SIZE)
+    logging.debug(f"Total Cooccurrence Records: {cooccurrence_count}")
+    logging.debug(f"Total Partition Count: {partition_count}")
     cooccurrence_query = sqlalchemy.select(models.Cooccurrence).execution_options(stream_results=True)
-    x = 0
-    for file_num in range(0,file_count):
-        with open(f"{file_prefix}{file_num}.tsv", "w") as outfile:
-            for cooccurrence, in session.execute(cooccurrence_query.offset(file_num * ROW_BATCH_SIZE).limit(ROW_BATCH_SIZE)):
-                x += 1
-                if x % (ASSERTION_LIMIT / 5) == 0:
-                    logging.info(f'Cooccurrence count: {x}')
-                output.write('\t'.join(cooccurrence.get_edge_kgx(use_uniprot=use_uniprot)) + '\n')
-        logging.info(f"Done writing file {file_prefix}{file_num}.tsv")
-        services.upload_to_gcp(bucket, f"{file_prefix}{file_num}.tsv", f"{directory}{file_prefix}{file_num}.tsv")
-    services.compose_gcp_files(bucket, directory, file_prefix, "cooccurrence_edges.tsv")
-    services.remove_temp_files(bucket, [f"{file_prefix}{num}.tsv" for num in range(0, file_count)])
-    logging.info('edge output complete')
+    with gzip.open(output_filename, "wb") as outfile:
+        for partition_number in range(0, partition_count):
+            for cooccurrence, in session.execute(cooccurrence_query.offset(partition_number * ROW_BATCH_SIZE).limit(ROW_BATCH_SIZE)):
+                line = '\t'.join(cooccurrence.get_edge_kgx(use_uniprot=use_uniprot)) + '\n'
+                outfile.write(line.encode('utf-8'))
+            outfile.flush()
+            logging.debug(f"Done with partition {partition_number}")
+    logging.info('Edge output complete')
 
 
-def export_all(session, bucket, blob_prefix, use_uniprot=True):
-    write_nodes(session, 'nodes.tsv', use_uniprot)
-    services.upload_to_gcp(bucket, 'c_nodes.tsv', f'{blob_prefix}cooccurrence_nodes.tsv')
-    write_edges(session, 'c_edges', bucket, blob_prefix, use_uniprot)
+def export_kg(session: sqlalchemy.orm.Session, bucket: str, blob_prefix: str, use_uniprot: bool=False) -> None:
+    """
+    Create and upload the node and edge KGX files for targeted assertions.
+
+    :param session: the database session
+    :param bucket: the output GCP bucket name
+    :param blob_prefix: the directory prefix for the uploaded files
+    :param use_uniprot: whether to translate the PR curies to UniProt (curies with no UniProt equivalent will be excluded)
+    """
+    write_nodes_compressed(session, 'nodes.tsv.gz', use_uniprot=use_uniprot)
+    services.upload_to_gcp(bucket, 'nodes.tsv.gz', f'{blob_prefix}cooccurrence_nodes.tsv.gz')
+    write_edges_compressed(session, "edges.tsv.gz", use_uniprot=use_uniprot)
+    services.upload_to_gcp(bucket, 'edges.tsv.gz', f'{blob_prefix}cooccurrence_edges.tsv.gz')
