@@ -10,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 
 Model = declarative_base(name='Model')
 session = None
+HUMAN_TAXON = 'NCBITaxon:9606'
 
 
 class Assertion(Model):
@@ -95,6 +96,10 @@ class Assertion(Model):
 
     def get_other_edge_kgx(self, predicate, limit=0):
         if (self.object_curie.startswith('PR:') and not self.object_uniprot) or (self.subject_curie.startswith('PR:') and not self.subject_uniprot):
+            return []
+        if self.subject_uniprot and not self.subject_uniprot.taxon == HUMAN_TAXON:
+            return []
+        if self.object_uniprot and not self.object_uniprot.taxon == HUMAN_TAXON:
             return []
         subject_id = self.subject_uniprot.uniprot if self.subject_uniprot else self.subject_curie
         object_id = self.object_uniprot.uniprot if self.object_uniprot else self.object_curie
@@ -322,11 +327,13 @@ class PRtoUniProt(Model):
     __tablename__ = 'pr_to_uniprot'
     pr = Column(String(100), ForeignKey('cooccurrence.entity1_curie'), ForeignKey('cooccurrence.entity2_curie'), primary_key=True)
     uniprot = Column(String(100))
+    taxon = Column(String(100))
     UniqueConstraint('pr', 'uniprot', name='pr+uniprot')
 
-    def __init__(self, pr, uniprot):
+    def __init__(self, pr, uniprot, taxon):
         self.pr = pr
         self.uniprot = uniprot
+        self.taxon = taxon
 
 
 class Cooccurrence(Model):
