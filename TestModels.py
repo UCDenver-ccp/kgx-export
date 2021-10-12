@@ -32,12 +32,56 @@ class ModelTestCase(unittest.TestCase):
         self.session.add(self.evidence_score_2)
         self.evidence_score_3 = models.EvidenceScore('xyz', 'false', 0.000630744)
         self.session.add(self.evidence_score_3)
-        self.pr_to_uniprot = models.PRtoUniProt('PR:000000015', 'UniProtKB:P19883')
+        self.pr_to_uniprot = models.PRtoUniProt('PR:000000015', 'UniProtKB:P19883', 'NCBITaxon:9606')
         self.session.add(self.pr_to_uniprot)
+        self.cooccurrence = models.Cooccurrence('ghi', 'CHEBI:00001', 'PR:000000001')
+        self.session.add(self.cooccurrence)
+        self.cooccurrence_scores_title = models.CooccurrenceScores('ghi', 'title', 123, 456, 78, 0.79529121, 2.4687596, 0.14797458, 0.78078191, -14.2326750, -30.9341095)
+        self.session.add(self.cooccurrence_scores_title)
+        self.cooccurrence_scores_abstract = models.CooccurrenceScores('ghi', 'abstract', 135, 791, 15, 0.91823842, -0.0071880, -0.00044927, -0.00153756, -16.0154754, -32.0237628)
+        self.session.add(self.cooccurrence_scores_abstract)
+        self.cooccurrence_scores_sentence = models.CooccurrenceScores('ghi', 'sentence', 246, 802, 178, 0.97411809, -0.7722175, -0.04826550, -0.11321754, -16.7805048, -32.7887922)
+        self.session.add(self.cooccurrence_scores_sentence)
+        self.cooccurrence_scores_document = models.CooccurrenceScores('ghi', 'document', 741, 852, 700, 0.85643479, -0.6615288, 0.04134718, 0.11027196, -15.3467586, -31.3550460)
+        self.session.add(self.cooccurrence_scores_document)
+        self.coocurrence_publication_title_1 = models.CooccurrencePublication('ghi', 'title', 'PMID:34570630')
+        self.session.add(self.coocurrence_publication_title_1)
+        self.coocurrence_publication_title_2 = models.CooccurrencePublication('ghi', 'title', 'PMID:34566824')
+        self.session.add(self.coocurrence_publication_title_2)
+        self.coocurrence_publication_title_3 = models.CooccurrencePublication('ghi', 'title', 'PMID:34557406')
+        self.session.add(self.coocurrence_publication_title_3)
+        self.coocurrence_publication_title_4 = models.CooccurrencePublication('ghi', 'title', 'PMID:34557200')
+        self.session.add(self.coocurrence_publication_title_4)
+        self.coocurrence_publication_abstract_1 = models.CooccurrencePublication('ghi', 'abstract', 'PMID:34556781')
+        self.session.add(self.coocurrence_publication_abstract_1)
+        self.coocurrence_publication_abstract_2 = models.CooccurrencePublication('ghi', 'abstract', 'PMID:34556089')
+        self.session.add(self.coocurrence_publication_abstract_2)
+        self.coocurrence_publication_abstract_3 = models.CooccurrencePublication('ghi', 'abstract', 'PMID:34555076')
+        self.session.add(self.coocurrence_publication_abstract_3)
+        self.coocurrence_publication_abstract_4 = models.CooccurrencePublication('ghi', 'abstract', 'PMID:34554099')
+        self.session.add(self.coocurrence_publication_abstract_4)
+        self.coocurrence_publication_sentence_1 = models.CooccurrencePublication('ghi', 'sentence', 'PMID:34553167')
+        self.session.add(self.coocurrence_publication_sentence_1)
+        self.coocurrence_publication_sentence_2 = models.CooccurrencePublication('ghi', 'sentence', 'PMID:34552921')
+        self.session.add(self.coocurrence_publication_sentence_2)
+        self.coocurrence_publication_sentence_3 = models.CooccurrencePublication('ghi', 'sentence', 'PMID:34552519')
+        self.session.add(self.coocurrence_publication_sentence_3)
+        self.coocurrence_publication_sentence_4 = models.CooccurrencePublication('ghi', 'sentence', 'PMID:34550967')
+        self.session.add(self.coocurrence_publication_sentence_4)
+        self.coocurrence_publication_document_1 = models.CooccurrencePublication('ghi', 'document', 'PMID:34550383')
+        self.session.add(self.coocurrence_publication_document_1)
+        self.coocurrence_publication_document_2 = models.CooccurrencePublication('ghi', 'document', 'PMID:34548706')
+        self.session.add(self.coocurrence_publication_document_2)
+        self.coocurrence_publication_document_3 = models.CooccurrencePublication('ghi', 'document', 'PMID:34547029')
+        self.session.add(self.coocurrence_publication_document_3)
+        self.coocurrence_publication_document_4 = models.CooccurrencePublication('ghi', 'document', 'PMID:34547014')
+        self.session.add(self.coocurrence_publication_document_4)
+        self.concept_idf = models.ConceptIDF('CHEBI:12345', 'abstract', 0.5)
+        self.session.add(self.concept_idf)
         self.session.commit()
 
-    def tearDown(self):
-        models.Model.metadata.drop_all(self.engine)
+    # def tearDown(self):
+    #     models.Model.metadata.drop_all(self.engine)
 
 # Query Tests
 
@@ -71,6 +115,131 @@ class ModelTestCase(unittest.TestCase):
         result = self.session.query(models.PRtoUniProt).all()
         self.assertEqual(result, expected)
 
+    def test_query_cooccurrence(self):
+        expected = [self.cooccurrence]
+        result = self.session.query(models.Cooccurrence).all()
+        self.assertEqual(result, expected)
+
+    def test_query_cooccurrence_scores(self):
+        expected = [self.cooccurrence_scores_title, self.cooccurrence_scores_abstract, self.cooccurrence_scores_sentence, self.cooccurrence_scores_document]
+        result = self.session.query(models.CooccurrenceScores).all()
+        self.assertEqual(result, expected)
+
+    def test_query_cooccurrence_publication_all(self):
+        expected = [
+            self.coocurrence_publication_title_1,
+            self.coocurrence_publication_title_2,
+            self.coocurrence_publication_title_3,
+            self.coocurrence_publication_title_4,
+            self.coocurrence_publication_abstract_1,
+            self.coocurrence_publication_abstract_2,
+            self.coocurrence_publication_abstract_3,
+            self.coocurrence_publication_abstract_4,
+            self.coocurrence_publication_sentence_1,
+            self.coocurrence_publication_sentence_2,
+            self.coocurrence_publication_sentence_3,
+            self.coocurrence_publication_sentence_4,
+            self.coocurrence_publication_document_1,
+            self.coocurrence_publication_document_2,
+            self.coocurrence_publication_document_3,
+            self.coocurrence_publication_document_4
+        ]
+        result = self.session.query(models.CooccurrencePublication).all()
+        self.assertEqual(result, expected)
+
+    def test_query_cooccurrence_publication_all(self):
+        expected = [
+            self.coocurrence_publication_title_1,
+            self.coocurrence_publication_title_2,
+            self.coocurrence_publication_title_3,
+            self.coocurrence_publication_title_4,
+            self.coocurrence_publication_abstract_1,
+            self.coocurrence_publication_abstract_2,
+            self.coocurrence_publication_abstract_3,
+            self.coocurrence_publication_abstract_4,
+            self.coocurrence_publication_sentence_1,
+            self.coocurrence_publication_sentence_2,
+            self.coocurrence_publication_sentence_3,
+            self.coocurrence_publication_sentence_4,
+            self.coocurrence_publication_document_1,
+            self.coocurrence_publication_document_2,
+            self.coocurrence_publication_document_3,
+            self.coocurrence_publication_document_4
+        ]
+        result = self.session.query(models.CooccurrencePublication).all()
+        self.assertEqual(result, expected)
+
+    def test_query_cooccurrence_publication_all(self):
+        expected = [
+            self.coocurrence_publication_title_1,
+            self.coocurrence_publication_title_2,
+            self.coocurrence_publication_title_3,
+            self.coocurrence_publication_title_4,
+            self.coocurrence_publication_abstract_1,
+            self.coocurrence_publication_abstract_2,
+            self.coocurrence_publication_abstract_3,
+            self.coocurrence_publication_abstract_4,
+            self.coocurrence_publication_sentence_1,
+            self.coocurrence_publication_sentence_2,
+            self.coocurrence_publication_sentence_3,
+            self.coocurrence_publication_sentence_4,
+            self.coocurrence_publication_document_1,
+            self.coocurrence_publication_document_2,
+            self.coocurrence_publication_document_3,
+            self.coocurrence_publication_document_4
+        ]
+        result = self.session.query(models.CooccurrencePublication).all()
+        self.assertEqual(result, expected)
+
+    def test_query_cooccurrence_publication_title(self):
+        expected = [
+            self.coocurrence_publication_title_1,
+            self.coocurrence_publication_title_2,
+            self.coocurrence_publication_title_3,
+            self.coocurrence_publication_title_4
+        ]
+        result = self.session.query(models.CooccurrencePublication)\
+            .where(models.CooccurrencePublication.level == 'title').all()
+        self.assertEqual(result, expected)
+
+    def test_query_cooccurrence_publication_abstract(self):
+        expected = [
+            self.coocurrence_publication_abstract_1,
+            self.coocurrence_publication_abstract_2,
+            self.coocurrence_publication_abstract_3,
+            self.coocurrence_publication_abstract_4,
+        ]
+        result = self.session.query(models.CooccurrencePublication)\
+            .where(models.CooccurrencePublication.level == 'abstract').all()
+        self.assertEqual(result, expected)
+
+    def test_query_cooccurrence_publication_sentence(self):
+        expected = [
+            self.coocurrence_publication_sentence_1,
+            self.coocurrence_publication_sentence_2,
+            self.coocurrence_publication_sentence_3,
+            self.coocurrence_publication_sentence_4,
+        ]
+        result = self.session.query(models.CooccurrencePublication)\
+            .where(models.CooccurrencePublication.level == 'sentence').all()
+        self.assertEqual(result, expected)
+
+    def test_query_cooccurrence_publication_document(self):
+        expected = [
+            self.coocurrence_publication_document_1,
+            self.coocurrence_publication_document_2,
+            self.coocurrence_publication_document_3,
+            self.coocurrence_publication_document_4
+        ]
+        result = self.session.query(models.CooccurrencePublication)\
+            .where(models.CooccurrencePublication.level == 'document').all()
+        self.assertEqual(set(result), set(expected))
+
+    def test_query_concept_idf(self):
+        expected = [self.concept_idf]
+        result = self.session.query(models.ConceptIDF).all()
+        self.assertEqual(result, expected)
+
 # Relationship Tests
 
     def test_relationship_assertion_to_evidence(self):
@@ -96,6 +265,17 @@ class ModelTestCase(unittest.TestCase):
         expected = [self.evidence_score_1, self.evidence_score_2, self.evidence_score_3]
         evidence_record = self.session.query(models.Evidence).one()
         self.assertEqual(evidence_record.evidence_scores, expected)
+
+    def test_relationship_cooccurrence_score_to_cooccurrence_publication_title(self):
+        expected = [
+            self.coocurrence_publication_title_1,
+            self.coocurrence_publication_title_2,
+            self.coocurrence_publication_title_3,
+            self.coocurrence_publication_title_4
+        ]
+        cooccurrence_score = self.session.query(models.CooccurrenceScores)\
+            .where(models.CooccurrenceScores.level == 'title').one()
+        self.assertEqual(set(cooccurrence_score.publication_list), set(expected))
 
 # Method Tests
 
