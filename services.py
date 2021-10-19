@@ -2,6 +2,8 @@ import http.client
 import json
 import logging
 import os
+import csv
+import sqlalchemy
 
 from google.cloud import storage
 
@@ -102,3 +104,21 @@ def remove_temp_files(bucket_name: str, file_list: list[str]) -> None:
             temp_blob.delete()
         else:
             logging.warn(f"Could not find file for deletion: {filename}")
+
+
+def insert_dictionary_records(session):
+    from models import PRtoUniProt
+    with open('in/pr-to-uniprot.tsv', 'r') as infile:
+        csv_reader = csv.reader(infile, 'excel-tab')
+        buffer = []
+        for row in csv_reader:
+            buffer.append({
+                'pr': row[0],
+                'uniprot': row[1],
+                'taxon': row[2]
+            })
+            if len(buffer) % 10000 == 0:
+                session.bulk_insert_mappings(PRtoUniProt, buffer)
+                buffer = []
+        session.bulk_insert_mappings(PRtoUniProt, buffer)
+    session.commit()
