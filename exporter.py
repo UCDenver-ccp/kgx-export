@@ -28,7 +28,7 @@ if __name__ == "__main__":
     ontology = args.ontology.lower() if args.ontology else 'both'
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
-
+    # os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'kgx-creds.json'
     models.init_db(
         instance=args.instance if args.instance else os.getenv('MYSQL_DATABASE_INSTANCE', None),
         user=args.user if args.user else os.getenv('MYSQL_DATABASE_USER', None),

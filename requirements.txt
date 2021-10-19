@@ -129,3 +129,4 @@ websocket-client==1.2.1
 wget==3.2
 wrapt==1.12.1
 cloud-sql-python-connector[pymysql]
+coverage
