@@ -87,7 +87,7 @@ class Assertion(Model):
         display_predicate = predicate
         if predicate == 'biolink:gain_of_function_contributes_to' or predicate == 'biolink:loss_of_function_contributes_to':
             display_predicate = 'biolink:contributes_to'
-        return [self.subject_curie, predicate, self.object_curie, self.assertion_id,
+        return [self.subject_curie, display_predicate, self.object_curie, self.assertion_id,
                 self.association_curie, self.get_aggregate_score(predicate), supporting_study_results, supporting_publications,
                 self.get_json_attributes(predicate, relevant_evidence)]
 
@@ -97,9 +97,7 @@ class Assertion(Model):
     def get_other_edge_kgx(self, predicate, limit=0):
         if (self.object_curie.startswith('PR:') and not self.object_uniprot) or (self.subject_curie.startswith('PR:') and not self.subject_uniprot):
             return []
-        if self.subject_uniprot and not self.subject_uniprot.taxon == HUMAN_TAXON:
-            return []
-        if self.object_uniprot and not self.object_uniprot.taxon == HUMAN_TAXON:
+        if (self.subject_uniprot and not self.subject_uniprot.taxon == HUMAN_TAXON) or (self.object_uniprot and not self.object_uniprot.taxon == HUMAN_TAXON):
             return []
         subject_id = self.subject_uniprot.uniprot if self.subject_uniprot else self.subject_curie
         object_id = self.object_uniprot.uniprot if self.object_uniprot else self.object_curie
@@ -108,7 +106,10 @@ class Assertion(Model):
             relevant_evidence = relevant_evidence[:limit]
         supporting_study_results = '|'.join([f'tmkp:{ev.evidence_id}' for ev in relevant_evidence])
         supporting_publications = '|'.join([ev.document_id for ev in relevant_evidence])
-        return [subject_id, predicate, object_id, self.assertion_id, self.association_curie,
+        display_predicate = predicate
+        if predicate == 'biolink:gain_of_function_contributes_to' or predicate == 'biolink:loss_of_function_contributes_to':
+            display_predicate = 'biolink:contributes_to'
+        return [subject_id, display_predicate, object_id, self.assertion_id, self.association_curie,
                 self.get_aggregate_score(predicate), supporting_study_results, supporting_publications,
                 self.get_json_attributes(predicate, relevant_evidence)]
 
@@ -350,36 +351,6 @@ class Cooccurrence(Model):
         self.entity1_curie = entity1_curie
         self.entity2_curie = entity2_curie
 
-    def get_edge_kgx(self, use_uniprot=False) -> list:
-        if use_uniprot:
-            if (self.entity1_curie.startswith('PR:') and not self.entity1_uniprot) or (self.entity2_curie.startswith('PR:') and not self.entity2_uniprot):
-                return []
-        entity1 = self.entity1_uniprot.uniprot if use_uniprot and self.entity1_uniprot else self.entity1_curie
-        entity2 = self.entity2_uniprot.uniprot if use_uniprot and self.entity2_uniprot else self.entity2_curie
-        supporting_study_results = '|'.join(f'tmkp:{sco.cooccurrence_id}_{sco.level}' for sco in self.scores_list)
-        return [entity1, 'biolink:related_to', entity2, self.cooccurrence_id,
-                'biolink:Association', supporting_study_results, json.dumps(self.get_json_attributes())]
-
-    def get_json_attributes(self) -> list:
-        attributes_list = [
-            {
-                "attribute_type_id": "biolink:original_knowledge_source",
-                "value": "infores:text-mining-provider-cooccurrence",
-                "value_type_id": "biolink:InformationResource",
-                "description": "The Text Mining Provider Concept Cooccurrence KP from NCATS Translator provides cooccurrence metrics for text-mined concepts that cooccur at various levels, e.g. document, sentence, etc. in the biomedical literature.",
-                "attribute_source": "infores:text-mining-provider-cooccurrence"
-            },
-            {
-                "attribute_type_id": "biolink:supporting_data_source",
-                "value": "infores:pubmed",
-                "value_type_id": "biolink:InformationResource",
-                "attribute_source": "infores:text-mining-provider-cooccurrence"
-            }
-        ]
-        for score in self.scores_list:
-            attributes_list.append(score.get_json_attributes())
-        return attributes_list
-
 
 class CooccurrenceScores(Model):
     __tablename__ = 'cooccurrence_scores'
@@ -410,98 +381,6 @@ class CooccurrenceScores(Model):
         self.mutual_dependence = mutual_dependence
         self.lfmd = lfmd
 
-    def get_json_attributes(self) -> dict:
-        biolink_level = 'biolink:DocumentLevelConceptCooccurrenceAnalysisResult'
-        desc = 'a single result from computing cooccurrence metrics between two concepts that cooccur at the document level'
-        if self.level == 'document':
-            biolink_level = 'biolink:DocumentLevelConceptCooccurrenceAnalysisResult'
-            desc = 'a single result from computing cooccurrence metrics between two concepts that cooccur at the document level'
-        elif self.level == 'sentence':
-            biolink_level = 'biolink:SentenceLevelConceptCooccurrenceAnalysisResult'
-            desc = 'a single result from computing cooccurrence metrics between two concepts that cooccur at the sentence level'
-        elif self.level == 'title':
-            biolink_level = 'biolink:TitleLevelConceptCooccurrenceAnalysisResult'
-            desc = 'a single result from computing cooccurrence metrics between two concepts that cooccur in the document title'
-        elif self.level == 'abstract':
-            biolink_level = 'biolink:AbstractLevelConceptCooccurrenceAnalysisResult'
-            desc = 'a single result from computing cooccurrence metrics between two concepts that cooccur in the abstract'
-        return {
-            "attribute_type_id": "biolink:supporting_study_result",
-            "value": f"tmkp:{self.cooccurrence_id}_{self.level}",
-            "value_type_id": biolink_level,
-            "description": desc,
-            "attribute_source": "infores:text-mining-provider-cooccurrence",
-            "attributes": [
-                {
-                    "attribute_type_id": "biolink:supporting_document",
-                    "value": '|'.join(f'tmkp:{pub.document_id}' for pub in self.publication_list),
-                    "value_type_id": "biolink:Publication",
-                    "description": f"The documents where the concepts of this assertion were observed to cooccur at the {self.level} level.",
-                    "attribute_source": "infores:pubmed"
-                },
-                {
-                    "attribute_type_id": "biolink:tmkp_concept1_count",
-                    "value": self.concept1_count,
-                    "value_type_id": "SIO:000794",
-                    "description": f"The number of times concept #1 was observed to occur at the {self.level} level in the documents that were processed"
-                },
-                {
-                    "attribute_type_id": "biolink:tmkp_concept2_count",
-                    "value": self.concept2_count,
-                    "value_type_id": "SIO:000794",
-                    "description": f"The number of times concept #2 was observed to occur at the {self.level} level in the documents that were processed"
-                },
-                {
-                    "attribute_type_id": "biolink:tmkp_concept_pair_count",
-                    "value": self.pair_count,
-                    "value_type_id": "SIO:000794",
-                    "description": f"The number of times the concepts of this assertion were observed to cooccur at the {self.level} level in the documents that were processed"
-                },
-                {
-                    "attribute_type_id": "biolink:tmkp_normalized_google_distance",
-                    "value": self.ngd,
-                    "value_type_id": "EDAM:data_1772",
-                    "description": f"The number of times the concepts of this assertion were observed to cooccur at the {self.level} level in the documents that were processed",
-                    "attribute_source": "infores:text-mining-provider-cooccurrence"
-                },
-                {
-                    "attribute_type_id": "biolink:tmkp_pointwise_mutual_information",
-                    "value": self.pmi,
-                    "value_type_id": "EDAM:data_1772",
-                    "description": "The pointwise mutual information score for the concepts in this assertion based on their cooccurrence in the documents that were processed",
-                    "attribute_source": "infores:text-mining-provider-cooccurrence"
-                },
-                {
-                    "attribute_type_id": "biolink:tmkp_normalized_pointwise_mutual_information",
-                    "value": self.pmi_norm,
-                    "value_type_id": "EDAM:data_1772",
-                    "description": "The normalized pointwise mutual information score for the concepts in this assertion based on their cooccurrence in the documents that were processed",
-                    "attribute_source": "infores:text-mining-provider-cooccurrence"
-                },
-                {
-                    "attribute_type_id": "biolink:tmkp_mutual_dependence",
-                    "value": self.mutual_dependence,
-                    "value_type_id": "EDAM:data_1772",
-                    "description": "The mutual dependence (PMI^2) score for the concepts in this assertion based on their cooccurrence in the documents that were processed",
-                    "attribute_source": "infores:text-mining-provider-cooccurrence"
-                },
-                {
-                    "attribute_type_id": "biolink:tmkp_normalized_pointwise_mutual_information_max",
-                    "value": self.pmi_norm_max,
-                    "value_type_id": "EDAM:data_1772",
-                    "description": "A variant of the normalized pointwise mutual information score for the concepts in this assertion based on their cooccurrence in the documents that were processed",
-                    "attribute_source": "infores:text-mining-provider-cooccurrence"
-                },
-                {
-                    "attribute_type_id": "biolink:tmkp_log_frequency_biased_mutual_dependence",
-                    "value": self.lfmd,
-                    "value_type_id": "EDAM:data_1772",
-                    "description": "The log frequency biased mutual dependence score for the concepts in this assertion based on their cooccurrence in the documents that were processed",
-                    "attribute_source": "infores:text-mining-provider-cooccurrence"
-                }
-            ]
-        }
-
 
 class CooccurrencePublication(Model):
     __tablename__ = 'cooccurrence_publication'
@@ -527,7 +406,7 @@ class ConceptIDF(Model):
         self.idf = idf
 
 
-def init_db(instance: str, user: str, password: str, database: str) -> None:
+def init_db(instance: str, user: str, password: str, database: str) -> None: # pragma: no cover
     def get_conn() -> pymysql.connections.Connection:
         conn: pymysql.connections.Connection = connector.connect(
             instance_connection_string=instance,
