@@ -17,10 +17,13 @@ def get_normalized_nodes(curie_list: list[str]) -> dict:
     json_data = json.dumps({'curies': curie_list, 'conflate': False})
     headers = {"Content-type": "application/json", "Accept": "application/json"}
     conn = http.client.HTTPSConnection(host='nodenormalization-sri.renci.org')
-    conn.request('POST', '/1.2/get_normalized_nodes', body=json_data, headers=headers)
-    response = conn.getresponse()
-    if response.status == 200:
-        return json.loads(response.read())
+    try:
+        conn.request('POST', '/1.2/get_normalized_nodes', body=json_data, headers=headers)
+        response = conn.getresponse()
+        if response.status == 200:
+            return json.loads(response.read())
+    finally:
+        conn.close()
     logging.warning("Failed to get normalized nodes")
     return {}
 
@@ -66,6 +69,14 @@ def upload_to_gcp(bucket_name: str, source_file_name: str, destination_blob_name
     blob.upload_from_filename(source_file_name, timeout=300, num_retries=2)
     if blob.exists() and os.path.isfile(source_file_name) and delete_source_file:
         os.remove(source_file_name)
+
+
+def get_from_gcp(bucket_name: str, blob_name: str, destination_file_name: str) -> None:
+    client = storage.Client()
+    bucket = client.bucket(bucket_name)
+    logging.info(f'Downloading {blob_name} to {destination_file_name}')
+    blob = bucket.blob(blob_name)
+    blob.download_to_filename(destination_file_name)
 
 
 def compose_gcp_files(bucket_name: str, directory: str, file_prefix: str, new_file_name: str) -> None:

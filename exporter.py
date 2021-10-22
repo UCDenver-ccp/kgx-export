@@ -5,6 +5,7 @@ import argparse
 import cooccurrence
 import models
 import targeted
+import services
 
 if __name__ == "__main__":
     logging.basicConfig(format='%(asctime)s %(module)s:%(funcName)s:%(levelname)s: %(message)s', level=logging.INFO)
@@ -20,6 +21,7 @@ if __name__ == "__main__":
     parser.add_argument('-uni', '--uniprot_bucket', help='storage bucket for UniProt data')
     parser.add_argument('-l', '--limit', help='maximum number of publications to export per edge', default=0, type=int)
     parser.add_argument('-v', '--verbose', action='store_true')
+    parser.add_argument('-e', '--kge_only', action='store_true')
     args = parser.parse_args()
 
     pr_bucket = args.pr_bucket if args.pr_bucket else 'test_kgx_output_bucket'
@@ -28,7 +30,7 @@ if __name__ == "__main__":
     ontology = args.ontology.lower() if args.ontology else 'both'
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
-    # os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'kgx-creds.json'
+    # os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'prod-creds.json'
     models.init_db(
         instance=args.instance if args.instance else os.getenv('MYSQL_DATABASE_INSTANCE', None),
         user=args.user if args.user else os.getenv('MYSQL_DATABASE_USER', None),
@@ -41,10 +43,18 @@ if __name__ == "__main__":
         logging.info("Exporting Cooccurrence knowledge graph")
         if ontology == 'uniprot' or ontology == 'both':
             logging.info("Exporting UniProt")
-            cooccurrence.export_kg(session, uniprot_bucket, 'kgx/UniProt/', use_uniprot=True)
+            if args.kge_only:
+                cooccurrence.create_kge_tarball(uniprot_bucket, "kgx/UniProt/")
+                services.upload_to_gcp(uniprot_bucket, 'cooccurrence.tar.gz', "kgx/UniProt/cooccurrence.tar.gz")
+            else:
+                cooccurrence.export_kg(session, uniprot_bucket, 'kgx/UniProt/', use_uniprot=True)
         if ontology == 'pr' or ontology == 'both':
             logging.info("Exporting PR")
-            cooccurrence.export_kg(session, pr_bucket, 'kgx/PR/', use_uniprot=False)
+            if args.kge_only:
+                cooccurrence.create_kge_tarball(pr_bucket, "kgx/PR/")
+                services.upload_to_gcp(pr_bucket, 'cooccurrence.tar.gz', "kgx/PR/cooccurrence.tar.gz")
+            else:
+                cooccurrence.export_kg(session, pr_bucket, 'kgx/PR/', use_uniprot=False)
     if args.knowledgegraph == 'targeted' or args.knowledgegraph == 'all':
         logging.info("Exporting Targeted Assertion knowledge graph")
         if ontology == 'uniprot' or ontology == 'both':

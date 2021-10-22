@@ -4,6 +4,7 @@ import math
 import shutil
 import json
 import os
+import csv
 from typing import Iterator
 
 import models
@@ -21,16 +22,16 @@ edge_metadata = {}
 sri_normalized_nodes = {}
 
 
-def update_node_metadata(node: list[str]) -> None:
+def update_node_metadata(node: list[str], node_metadata_dict: dict) -> dict:
     category = node[2]
     prefix = node[0].split(':')[0]
-    if category in node_metadata:
-        if prefix not in node_metadata[category]["id_prefixes"]:
-            node_metadata[category]["id_prefixes"].append(prefix)
-        node_metadata[category]["count"] += 1
-        node_metadata[category]["count_by_source"]["original_knowledge_source"]["infores:text-mining-provider-cooccurrence"] += 1
+    if category in node_metadata_dict:
+        if prefix not in node_metadata_dict[category]["id_prefixes"]:
+            node_metadata_dict[category]["id_prefixes"].append(prefix)
+        node_metadata_dict[category]["count"] += 1
+        node_metadata_dict[category]["count_by_source"]["original_knowledge_source"]["infores:text-mining-provider-cooccurrence"] += 1
     else:
-        node_metadata[category] = {
+        node_metadata_dict[category] = {
             "id_prefixes": [prefix],
             "count": 1,
             "count_by_source": {
@@ -39,20 +40,21 @@ def update_node_metadata(node: list[str]) -> None:
                 }
             }
         }
+    return node_metadata_dict
 
 
-def update_edge_metadata(edge: list) -> None:
-    object_category = get_category(edge[0], normalized_nodes=sri_normalized_nodes)
-    subject_category = get_category(edge[2], normalized_nodes=sri_normalized_nodes)
+def update_edge_metadata(edge: list, edge_metadata_dict: dict, node_dict: dict) -> dict:
+    object_category = get_category(edge[0], normalized_nodes=node_dict)
+    subject_category = get_category(edge[2], normalized_nodes=node_dict)
     triple = f"{object_category}|{edge[1]}|{subject_category}"
     relation = edge[4]
-    if triple in edge_metadata:
-        if relation not in edge_metadata[triple]["relations"]:
-            edge_metadata[triple]["relations"].append(relation)
-        edge_metadata[triple]["count"] += 1
-        edge_metadata[triple]["count_by_source"]["original_knowledge_source"]["infores:text-mining-provider-cooccurrence"] += 1
+    if triple in edge_metadata_dict:
+        if relation not in edge_metadata_dict[triple]["relations"]:
+            edge_metadata_dict[triple]["relations"].append(relation)
+        edge_metadata_dict[triple]["count"] += 1
+        edge_metadata_dict[triple]["count_by_source"]["original_knowledge_source"]["infores:text-mining-provider-cooccurrence"] += 1
     else:
-        edge_metadata[triple] = {
+        edge_metadata_dict[triple] = {
             "subject": subject_category,
             "predicate": edge[1],
             "object": object_category,
@@ -64,9 +66,10 @@ def update_edge_metadata(edge: list) -> None:
                 }
             }
         }
+    return edge_metadata_dict
 
 
-def get_category(curie, normalized_nodes):
+def get_category(curie: str, normalized_nodes: dict[str, dict]) -> str:
     category = 'biolink:SmallMolecule' if curie.startswith('DRUGBANK') else 'biolink:NamedThing'
     if curie in normalized_nodes and normalized_nodes[curie] is not None:
         category = normalized_nodes[curie]["type"][0]
@@ -93,6 +96,38 @@ def get_kgx_nodes(curies: list[str], normalized_nodes:dict[str, dict]) -> Iterat
                 category = normalized_nodes[curie]['type'][0]
             yield [curie, name, category]
         yield []
+
+
+def generate_metadata(nodes_filename: str, edges_filename: str, compressed: bool=True) -> dict:
+    nodes_metadata_dict = {}
+    edges_metadata_dict = {}
+    node_curies = []
+    logging.info("Node metadata start")
+    if compressed:
+        nodes_file = gzip.open(nodes_filename, 'rt')
+    else:
+        nodes_file = open(nodes_filename, 'r')
+    reader = csv.reader(nodes_file, delimiter='\t')
+    for node in reader:
+        node_curies.append(node[0])
+        nodes_metadata_dict = update_node_metadata(node, nodes_metadata_dict)
+    nodes_file.close()
+    logging.info("Node metadata end")
+    normalized_nodes = services.get_normalized_nodes(node_curies)
+    logging.info("Edge metadata start")
+    if compressed:
+        edges_file = gzip.open(edges_filename, 'rt')
+    else:
+        edges_file = open(edges_filename, 'r')
+    reader = csv.reader(edges_file, delimiter='\t')
+    for edge in reader:
+        edges_metadata_dict = update_edge_metadata(edge, edges_metadata_dict, normalized_nodes)
+    edges_file.close()
+    logging.info("Edge metadata end")
+    return {
+        "nodes": nodes_metadata_dict,
+        "edges": list(edges_metadata_dict.values())
+    }
 
 
 def write_nodes(session: sqlalchemy.orm.Session, outfile: str, use_uniprot: bool=False) -> None:
@@ -395,14 +430,25 @@ def write_edges_compressed(session: sqlalchemy.orm.Session, output_filename: str
     logging.info('Edge output complete')
 
 
-def create_kge_tarball() -> None:
+def create_kge_tarball(bucket: str, blob_prefix: str) -> None:
+    if not os.path.isdir(output_dir):
+        os.mkdir(output_dir)
     if not os.path.isdir('tmpc'):
         os.mkdir('tmpc')
+    if not os.path.isfile(nodes_filename):
+        logging.debug("Downloading nodes file")
+        services.get_from_gcp(bucket, f'{blob_prefix}cooccurrence_nodes.tsv.gz', nodes_filename)
+    if not os.path.isfile(edges_filename):
+        logging.debug("Downloading edges file")
+        services.get_from_gcp(bucket, f'{blob_prefix}cooccurrence_edges.tsv.gz', edges_filename)
     metadata_file = "tmpc/content_metadata.json"
-    metadata_dict = {
-        "nodes": node_metadata,
-        "edges": list(edge_metadata.values())
-    }
+    if len(node_metadata) == 0 or len(edge_metadata) == 0:
+        metadata_dict = generate_metadata(nodes_filename, edges_filename, True)
+    else:
+        metadata_dict = {
+            "nodes": node_metadata,
+            "edges": list(edge_metadata.values())
+        }
 
     logging.info("Writing metadata file")
     with open(metadata_file, 'w') as outfile:
@@ -440,5 +486,5 @@ def export_kg(session: sqlalchemy.orm.Session, bucket: str, blob_prefix: str, us
     write_edges(session, edges_filename, use_uniprot=use_uniprot)
     services.upload_to_gcp(bucket, edges_filename, f'{blob_prefix}cooccurrence_edges.tsv.gz')
     services.upload_to_gcp(bucket, pairs_filename, f'{blob_prefix}cooccurrence_pairs.txt')
-    create_kge_tarball()
+    create_kge_tarball(bucket, blob_prefix)
     services.upload_to_gcp(bucket, 'cooccurrence.tar.gz', f"{blob_prefix}cooccurrence.tar.gz")

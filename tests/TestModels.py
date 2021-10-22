@@ -1,3 +1,4 @@
+import os
 import unittest
 import hashlib
 import random
@@ -8,6 +9,11 @@ import models
 
 
 class ModelTestCase(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls) -> None: # pragma: no cover
+        if '\\tests' not in os.getcwd():
+            os.chdir(f'{os.getcwd()}\\tests')
 
     def setUp(self):
         self.engine = create_engine('sqlite:///:memory:')
@@ -45,143 +51,6 @@ class ModelTestCase(unittest.TestCase):
                 ]
             }
         }
-
-    def populate_db(self):
-        self.pr_to_uniprot = models.PRtoUniProt('PR:000000015', 'UniProtKB:P19883', 'NCBITaxon:9606')
-        self.session.add(self.pr_to_uniprot)
-        self.pr_to_uniprot2 = models.PRtoUniProt('PR:000000016', 'UniProtKB:P19884', 'NCBITaxon:9605')
-        self.session.add(self.pr_to_uniprot2)
-        self.concept_idf = models.ConceptIDF('CHEBI:12345', 'abstract', 0.5)
-        self.session.add(self.concept_idf)
-
-        # basic assertion for "happy path" testing
-        self.assertion = models.Assertion('abcde', 'CHEBI:24433', 'PR:000000015', 'biolink:ChemicalToGeneAssociation')
-        self.session.add(self.assertion)
-        self.evidence = models.Evidence('xyz', 'abcde', 'PMID:32807176', 'something', 'def', 'efd', 'title', 'article', 2020)
-        self.session.add(self.evidence)
-        self.subject_entity = models.Entity('def', '1|2', 'a')
-        self.session.add(self.subject_entity)
-        self.object_entity = models.Entity('efd', '2|4', 'be')
-        self.session.add(self.object_entity)
-        self.evaluation = models.Evaluation('abcde', False, False, False, False, 1234)
-        self.session.add(self.evaluation)
-        self.evidence_score_1 = models.EvidenceScore('xyz', 'biolink:entity_negatively_regulates_entity', 0.000161453)
-        self.session.add(self.evidence_score_1)
-        self.evidence_score_2 = models.EvidenceScore('xyz', 'biolink:entity_positively_regulates_entity', 0.999207900)
-        self.session.add(self.evidence_score_2)
-        self.evidence_score_3 = models.EvidenceScore('xyz', 'false', 0.000630744)
-        self.session.add(self.evidence_score_3)
-
-        # assertion with untranslatable (non-uniprot) curie
-        self.assertion2 = models.Assertion('fghij', 'CHEBI:00001', 'PR:000000001', 'biolink:ChemicalToGeneAssociation')
-        self.session.add(self.assertion2)
-        self.evidence2 = models.Evidence('zyx', 'fghij', 'PMID:67170823', 'something', 'ghi', 'ihg', 'title', 'article', 2020)
-        self.session.add(self.evidence2)
-        self.subject_entity2 = models.Entity('ghi', '1|2', 'a')
-        self.session.add(self.subject_entity2)
-        self.object_entity2 = models.Entity('ihg', '2|4', 'be')
-        self.session.add(self.object_entity2)
-        self.evaluation2 = models.Evaluation('fghij', False, False, False, False, 7)
-        self.session.add(self.evaluation2)
-        self.evidence_score_4 = models.EvidenceScore('zyx', 'biolink:entity_negatively_regulates_entity', 0.161453)
-        self.session.add(self.evidence_score_4)
-        self.evidence_score_5 = models.EvidenceScore('zyx', 'biolink:entity_positively_regulates_entity', 0.9992)
-        self.session.add(self.evidence_score_5)
-        self.evidence_score_6 = models.EvidenceScore('zyx', 'false', 0.30744)
-        self.session.add(self.evidence_score_6)
-
-        # assertion with "contributes_to" predicate
-        self.assertion3 = models.Assertion('klmno', 'CHEBI:24433', 'PR:000000015', 'biolink:ChemicalToGeneAssociation')
-        self.session.add(self.assertion3)
-        self.evidence3 = models.Evidence('tsr', 'klmno', 'PMID:67193280', 'something', 'jkl', 'lkj', 'abstract', 'article', 2020)
-        self.session.add(self.evidence3)
-        self.subject_entity3 = models.Entity('jkl', '1|2', 'a')
-        self.session.add(self.subject_entity3)
-        self.object_entity3 = models.Entity('lkj', '2|4', 'be')
-        self.session.add(self.object_entity3)
-        self.evaluation3 = models.Evaluation('fghij', False, False, False, False, 7)
-        self.session.add(self.evaluation3)
-        self.evidence_score_7 = models.EvidenceScore('tsr', 'biolink:entity_negatively_regulates_entity', 0.161453)
-        self.session.add(self.evidence_score_7)
-        self.evidence_score_8 = models.EvidenceScore('tsr', 'biolink:gain_of_function_contributes_to', 0.9992)
-        self.session.add(self.evidence_score_8)
-        self.evidence_score_9 = models.EvidenceScore('tsr', 'false', 0.30744)
-        self.session.add(self.evidence_score_9)
-
-        # assertion with non-human taxon curie
-        self.assertion4 = models.Assertion('pqrst', 'CHEBI:24433', 'PR:000000016', 'biolink:ChemicalToGeneAssociation')
-        self.session.add(self.assertion4)
-        self.evidence4 = models.Evidence('qpo', 'pqrst', 'PMID:67193280', 'something', 'pqr', 'rqp', 'abstract', 'article', 2020)
-        self.session.add(self.evidence4)
-        self.subject_entity4 = models.Entity('pqr', '1|2', 'a')
-        self.session.add(self.subject_entity4)
-        self.object_entity4 = models.Entity('rqp', '2|4', 'be')
-        self.session.add(self.object_entity4)
-        self.evaluation4 = models.Evaluation('pqrst', False, False, False, False, 7)
-        self.session.add(self.evaluation4)
-        self.evidence_score_10 = models.EvidenceScore('qpo', 'biolink:entity_negatively_regulates_entity', 0.161453)
-        self.session.add(self.evidence_score_10)
-        self.evidence_score_11 = models.EvidenceScore('qpo', 'biolink:entity_positively_regulates_entity', 0.9992)
-        self.session.add(self.evidence_score_11)
-        self.evidence_score_12 = models.EvidenceScore('qpo', 'false', 0.30744)
-        self.session.add(self.evidence_score_12)
-
-        # assertion with multiple supporting studies
-        self.assertion5 = models.Assertion('uvwxy', 'CHEBI:24433', 'PR:000000015', 'biolink:ChemicalToGeneAssociation')
-        self.session.add(self.assertion5)
-        self.evidence5 = models.Evidence('nml', 'klmno', 'PMID:67133280', 'something', 'stu', 'uts', 'abstract', 'article', 2020)
-        self.session.add(self.evidence5)
-        self.evidence6 = models.Evidence('kji', 'klmno', 'PMID:67193280', 'something', 'vwx', 'xwv', 'abstract', 'article', 2020)
-        self.session.add(self.evidence6)
-        self.subject_entity5 = models.Entity('stu', '1|2', 'a')
-        self.session.add(self.subject_entity5)
-        self.object_entity5 = models.Entity('uts', '2|4', 'be')
-        self.session.add(self.object_entity5)
-        self.subject_entity6 = models.Entity('vwx', '1|2', 'a')
-        self.session.add(self.subject_entity6)
-        self.object_entity6 = models.Entity('xwv', '2|4', 'be')
-        self.session.add(self.object_entity6)
-        self.evaluation5 = models.Evaluation('uvwxy', False, False, False, False, 1234)
-        self.session.add(self.evaluation5)
-        self.evidence_score_13 = models.EvidenceScore('nml', 'biolink:entity_positively_regulates_entity', 0.9992)
-        self.session.add(self.evidence_score_13)
-        self.evidence_score_14 = models.EvidenceScore('nml', 'biolink:entity_negatively_regulates_entity', 0.161453)
-        self.session.add(self.evidence_score_14)
-        self.evidence_score_15 = models.EvidenceScore('nml', 'false', 0.30744)
-        self.session.add(self.evidence_score_15)
-        self.evidence_score_16 = models.EvidenceScore('kji', 'biolink:entity_positively_regulates_entity', 0.9992)
-        self.session.add(self.evidence_score_16)
-        self.evidence_score_17 = models.EvidenceScore('kji', 'biolink:entity_negatively_regulates_entity', 0.161453)
-        self.session.add(self.evidence_score_17)
-        self.evidence_score_18 = models.EvidenceScore('kji', 'false', 0.30744)
-        self.session.add(self.evidence_score_18)
-
-        # assertion with the other "contributes_to" predicate
-        self.assertion6 = models.Assertion('zabcd', 'CHEBI:24433', 'PR:000000015', 'biolink:ChemicalToGeneAssociation')
-        self.session.add(self.assertion6)
-        self.evidence7 = models.Evidence('hfe', 'zabcd', 'PMID:66193280', 'something', 'yza', 'azy', 'abstract', 'article', 2020)
-        self.session.add(self.evidence7)
-        self.subject_entity7 = models.Entity('yza', '1|2', 'a')
-        self.session.add(self.subject_entity7)
-        self.object_entity7 = models.Entity('azy', '2|4', 'be')
-        self.session.add(self.object_entity7)
-        self.evaluation6 = models.Evaluation('zabcd', False, False, False, False, 7)
-        self.session.add(self.evaluation6)
-        self.evidence_score_19 = models.EvidenceScore('hfe', 'biolink:entity_negatively_regulates_entity', 0.161453)
-        self.session.add(self.evidence_score_19)
-        self.evidence_score_20 = models.EvidenceScore('hfe', 'biolink:loss_of_function_contributes_to', 0.9992)
-        self.session.add(self.evidence_score_20)
-        self.evidence_score_21 = models.EvidenceScore('hfe', 'false', 0.30744)
-        self.session.add(self.evidence_score_21)
-
-        self.cooccurrence_records = self.generate_cooccurrence_records('curies.txt', 100)
-        self.cooccurrence_scores_records = self.generate_cooccurrence_scores_records(self.cooccurrence_records)
-        self.cooccurrence_publication_records = self.generate_cooccurrence_publication_records(self.cooccurrence_records)
-        self.session.add_all(self.cooccurrence_records)
-        self.session.add_all(self.cooccurrence_scores_records)
-        self.session.add_all(self.cooccurrence_publication_records)
-
-        self.session.commit()
 
 
 #region Query Tests
@@ -501,7 +370,7 @@ class ModelTestCase(unittest.TestCase):
 
 #region Helper Methods
 
-    def generate_cooccurrence_records(self, curie_filename: str, record_count: int=10000) -> list[models.Cooccurrence]:
+    def generate_cooccurrence_records(self, curie_filename: str, record_count: int=10) -> list[models.Cooccurrence]:
         with open(curie_filename, 'r') as curie_file:
             curies = curie_file.read().splitlines()
         record_list = []
@@ -555,4 +424,153 @@ class ModelTestCase(unittest.TestCase):
                 object_list.append(obj)
         return object_list
 
+
+    def populate_db(self):
+        self.pr_to_uniprot = models.PRtoUniProt('PR:000000015', 'UniProtKB:P19883', 'NCBITaxon:9606')
+        self.session.add(self.pr_to_uniprot)
+        self.pr_to_uniprot2 = models.PRtoUniProt('PR:000000016', 'UniProtKB:P19884', 'NCBITaxon:9605')
+        self.session.add(self.pr_to_uniprot2)
+        self.concept_idf = models.ConceptIDF('CHEBI:12345', 'abstract', 0.5)
+        self.session.add(self.concept_idf)
+
+        # basic assertion for "happy path" testing
+        self.assertion = models.Assertion('abcde', 'CHEBI:24433', 'PR:000000015', 'biolink:ChemicalToGeneAssociation')
+        self.session.add(self.assertion)
+        self.evidence = models.Evidence('xyz', 'abcde', 'PMID:32807176', 'something', 'def', 'efd', 'title', 'article',
+                                        2020)
+        self.session.add(self.evidence)
+        self.subject_entity = models.Entity('def', '1|2', 'a')
+        self.session.add(self.subject_entity)
+        self.object_entity = models.Entity('efd', '2|4', 'be')
+        self.session.add(self.object_entity)
+        self.evaluation = models.Evaluation('abcde', False, False, False, False, 1234)
+        self.session.add(self.evaluation)
+        self.evidence_score_1 = models.EvidenceScore('xyz', 'biolink:entity_negatively_regulates_entity', 0.000161453)
+        self.session.add(self.evidence_score_1)
+        self.evidence_score_2 = models.EvidenceScore('xyz', 'biolink:entity_positively_regulates_entity', 0.999207900)
+        self.session.add(self.evidence_score_2)
+        self.evidence_score_3 = models.EvidenceScore('xyz', 'false', 0.000630744)
+        self.session.add(self.evidence_score_3)
+
+        # assertion with untranslatable (non-uniprot) curie
+        self.assertion2 = models.Assertion('fghij', 'CHEBI:00001', 'PR:000000001', 'biolink:ChemicalToGeneAssociation')
+        self.session.add(self.assertion2)
+        self.evidence2 = models.Evidence('zyx', 'fghij', 'PMID:67170823', 'something', 'ghi', 'ihg', 'title', 'article',
+                                         2020)
+        self.session.add(self.evidence2)
+        self.subject_entity2 = models.Entity('ghi', '1|2', 'a')
+        self.session.add(self.subject_entity2)
+        self.object_entity2 = models.Entity('ihg', '2|4', 'be')
+        self.session.add(self.object_entity2)
+        self.evaluation2 = models.Evaluation('fghij', False, False, False, False, 7)
+        self.session.add(self.evaluation2)
+        self.evidence_score_4 = models.EvidenceScore('zyx', 'biolink:entity_negatively_regulates_entity', 0.161453)
+        self.session.add(self.evidence_score_4)
+        self.evidence_score_5 = models.EvidenceScore('zyx', 'biolink:entity_positively_regulates_entity', 0.9992)
+        self.session.add(self.evidence_score_5)
+        self.evidence_score_6 = models.EvidenceScore('zyx', 'false', 0.30744)
+        self.session.add(self.evidence_score_6)
+
+        # assertion with "contributes_to" predicate
+        self.assertion3 = models.Assertion('klmno', 'CHEBI:24433', 'PR:000000015', 'biolink:ChemicalToGeneAssociation')
+        self.session.add(self.assertion3)
+        self.evidence3 = models.Evidence('tsr', 'klmno', 'PMID:67193280', 'something', 'jkl', 'lkj', 'abstract', 'article',
+                                         2020)
+        self.session.add(self.evidence3)
+        self.subject_entity3 = models.Entity('jkl', '1|2', 'a')
+        self.session.add(self.subject_entity3)
+        self.object_entity3 = models.Entity('lkj', '2|4', 'be')
+        self.session.add(self.object_entity3)
+        self.evaluation3 = models.Evaluation('fghij', False, False, False, False, 7)
+        self.session.add(self.evaluation3)
+        self.evidence_score_7 = models.EvidenceScore('tsr', 'biolink:entity_negatively_regulates_entity', 0.161453)
+        self.session.add(self.evidence_score_7)
+        self.evidence_score_8 = models.EvidenceScore('tsr', 'biolink:gain_of_function_contributes_to', 0.9992)
+        self.session.add(self.evidence_score_8)
+        self.evidence_score_9 = models.EvidenceScore('tsr', 'false', 0.30744)
+        self.session.add(self.evidence_score_9)
+
+        # assertion with non-human taxon curie
+        self.assertion4 = models.Assertion('pqrst', 'CHEBI:24433', 'PR:000000016', 'biolink:ChemicalToGeneAssociation')
+        self.session.add(self.assertion4)
+        self.evidence4 = models.Evidence('qpo', 'pqrst', 'PMID:67193280', 'something', 'pqr', 'rqp', 'abstract', 'article',
+                                         2020)
+        self.session.add(self.evidence4)
+        self.subject_entity4 = models.Entity('pqr', '1|2', 'a')
+        self.session.add(self.subject_entity4)
+        self.object_entity4 = models.Entity('rqp', '2|4', 'be')
+        self.session.add(self.object_entity4)
+        self.evaluation4 = models.Evaluation('pqrst', False, False, False, False, 7)
+        self.session.add(self.evaluation4)
+        self.evidence_score_10 = models.EvidenceScore('qpo', 'biolink:entity_negatively_regulates_entity', 0.161453)
+        self.session.add(self.evidence_score_10)
+        self.evidence_score_11 = models.EvidenceScore('qpo', 'biolink:entity_positively_regulates_entity', 0.9992)
+        self.session.add(self.evidence_score_11)
+        self.evidence_score_12 = models.EvidenceScore('qpo', 'false', 0.30744)
+        self.session.add(self.evidence_score_12)
+
+        # assertion with multiple supporting studies
+        self.assertion5 = models.Assertion('uvwxy', 'CHEBI:24433', 'PR:000000015', 'biolink:ChemicalToGeneAssociation')
+        self.session.add(self.assertion5)
+        self.evidence5 = models.Evidence('nml', 'klmno', 'PMID:67133280', 'something', 'stu', 'uts', 'abstract', 'article',
+                                         2020)
+        self.session.add(self.evidence5)
+        self.evidence6 = models.Evidence('kji', 'klmno', 'PMID:67193280', 'something', 'vwx', 'xwv', 'abstract', 'article',
+                                         2020)
+        self.session.add(self.evidence6)
+        self.subject_entity5 = models.Entity('stu', '1|2', 'a')
+        self.session.add(self.subject_entity5)
+        self.object_entity5 = models.Entity('uts', '2|4', 'be')
+        self.session.add(self.object_entity5)
+        self.subject_entity6 = models.Entity('vwx', '1|2', 'a')
+        self.session.add(self.subject_entity6)
+        self.object_entity6 = models.Entity('xwv', '2|4', 'be')
+        self.session.add(self.object_entity6)
+        self.evaluation5 = models.Evaluation('uvwxy', False, False, False, False, 1234)
+        self.session.add(self.evaluation5)
+        self.evidence_score_13 = models.EvidenceScore('nml', 'biolink:entity_positively_regulates_entity', 0.9992)
+        self.session.add(self.evidence_score_13)
+        self.evidence_score_14 = models.EvidenceScore('nml', 'biolink:entity_negatively_regulates_entity', 0.161453)
+        self.session.add(self.evidence_score_14)
+        self.evidence_score_15 = models.EvidenceScore('nml', 'false', 0.30744)
+        self.session.add(self.evidence_score_15)
+        self.evidence_score_16 = models.EvidenceScore('kji', 'biolink:entity_positively_regulates_entity', 0.9992)
+        self.session.add(self.evidence_score_16)
+        self.evidence_score_17 = models.EvidenceScore('kji', 'biolink:entity_negatively_regulates_entity', 0.161453)
+        self.session.add(self.evidence_score_17)
+        self.evidence_score_18 = models.EvidenceScore('kji', 'false', 0.30744)
+        self.session.add(self.evidence_score_18)
+
+        # assertion with the other "contributes_to" predicate
+        self.assertion6 = models.Assertion('zabcd', 'CHEBI:24433', 'PR:000000015', 'biolink:ChemicalToGeneAssociation')
+        self.session.add(self.assertion6)
+        self.evidence7 = models.Evidence('hfe', 'zabcd', 'PMID:66193280', 'something', 'yza', 'azy', 'abstract', 'article',
+                                         2020)
+        self.session.add(self.evidence7)
+        self.subject_entity7 = models.Entity('yza', '1|2', 'a')
+        self.session.add(self.subject_entity7)
+        self.object_entity7 = models.Entity('azy', '2|4', 'be')
+        self.session.add(self.object_entity7)
+        self.evaluation6 = models.Evaluation('zabcd', False, False, False, False, 7)
+        self.session.add(self.evaluation6)
+        self.evidence_score_19 = models.EvidenceScore('hfe', 'biolink:entity_negatively_regulates_entity', 0.161453)
+        self.session.add(self.evidence_score_19)
+        self.evidence_score_20 = models.EvidenceScore('hfe', 'biolink:loss_of_function_contributes_to', 0.9992)
+        self.session.add(self.evidence_score_20)
+        self.evidence_score_21 = models.EvidenceScore('hfe', 'false', 0.30744)
+        self.session.add(self.evidence_score_21)
+
+        self.cooccurrence_records = self.generate_cooccurrence_records('data/curies.txt', 100)
+        self.cooccurrence_scores_records = self.generate_cooccurrence_scores_records(self.cooccurrence_records)
+        self.cooccurrence_publication_records = self.generate_cooccurrence_publication_records(self.cooccurrence_records)
+        self.session.add_all(self.cooccurrence_records)
+        self.session.add_all(self.cooccurrence_scores_records)
+        self.session.add_all(self.cooccurrence_publication_records)
+
+        self.session.commit()
+
 #endregion
+
+
+    def tearDown(self) -> None:
+        pass

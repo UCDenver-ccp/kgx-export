@@ -12,21 +12,18 @@ import sqlalchemy
 
 ROW_BATCH_SIZE = 50000
 HUMAN_TAXON = 'NCBITaxon:9606'
-node_metadata = {}
-edge_metadata = {}
-sri_normalized_nodes = {}
 
 
-def update_node_metadata(node: list[str]) -> None:
+def update_node_metadata(node: list[str], node_metadata_dict: dict) -> dict:
     category = node[2]
     prefix = node[0].split(':')[0]
-    if category in node_metadata:
-        if prefix not in node_metadata[category]["id_prefixes"]:
-            node_metadata[category]["id_prefixes"].append(prefix)
-        node_metadata[category]["count"] += 1
-        node_metadata[category]["count_by_source"]["original_knowledge_source"]["infores:text-mining-provider-targeted"] += 1
+    if category in node_metadata_dict:
+        if prefix not in node_metadata_dict[category]["id_prefixes"]:
+            node_metadata_dict[category]["id_prefixes"].append(prefix)
+        node_metadata_dict[category]["count"] += 1
+        node_metadata_dict[category]["count_by_source"]["original_knowledge_source"]["infores:text-mining-provider-targeted"] += 1
     else:
-        node_metadata[category] = {
+        node_metadata_dict[category] = {
             "id_prefixes": [prefix],
             "count": 1,
             "count_by_source": {
@@ -35,20 +32,21 @@ def update_node_metadata(node: list[str]) -> None:
                 }
             }
         }
+    return node_metadata_dict
 
 
-def update_edge_metadata(edge: list) -> None:
-    object_category = get_category(edge[0], normalized_nodes=sri_normalized_nodes)
-    subject_category = get_category(edge[2], normalized_nodes=sri_normalized_nodes)
+def update_edge_metadata(edge: list, edge_metadata_dict: dict, node_dict: dict) -> dict:
+    object_category = get_category(edge[0], normalized_nodes=node_dict)
+    subject_category = get_category(edge[2], normalized_nodes=node_dict)
     triple = f"{object_category}|{edge[1]}|{subject_category}"
     relation = edge[4]
-    if triple in edge_metadata:
-        if relation not in edge_metadata[triple]["relations"]:
-            edge_metadata[triple]["relations"].append(relation)
-        edge_metadata[triple]["count"] += 1
-        edge_metadata[triple]["count_by_source"]["original_knowledge_source"]["infores:text-mining-provider-targeted"] += 1
+    if triple in edge_metadata_dict:
+        if relation not in edge_metadata_dict[triple]["relations"]:
+            edge_metadata_dict[triple]["relations"].append(relation)
+        edge_metadata_dict[triple]["count"] += 1
+        edge_metadata_dict[triple]["count_by_source"]["original_knowledge_source"]["infores:text-mining-provider-targeted"] += 1
     else:
-        edge_metadata[triple] = {
+        edge_metadata_dict[triple] = {
             "subject": subject_category,
             "predicate": edge[1],
             "object": object_category,
@@ -60,11 +58,12 @@ def update_edge_metadata(edge: list) -> None:
                 }
             }
         }
+    return edge_metadata_dict
 
 
 def get_category(curie: str, normalized_nodes: dict[str, dict]) -> str:
     category = 'biolink:SmallMolecule' if curie.startswith('DRUGBANK') else 'biolink:NamedThing'
-    if curie in normalized_nodes and normalized_nodes[curie] is not None:
+    if curie in normalized_nodes and normalized_nodes[curie] is not None and 'type' in normalized_nodes[curie]:
         category = normalized_nodes[curie]["type"][0]
     return category
 
@@ -88,18 +87,20 @@ def get_kgx_nodes(curies: list[str], normalized_nodes: dict[str, dict]) -> Itera
             if 'type' in normalized_nodes[curie]:
                 category = normalized_nodes[curie]['type'][0]
             yield [curie, name, category]
-        yield []
+        else:
+            yield []
 
 
-def write_nodes(session: sqlalchemy.orm.Session, output_filename: str, use_uniprot: bool=False) -> None:
+def get_node_data(session: sqlalchemy.orm.Session, use_uniprot: bool=False) -> (list[str], dict[str, dict]):
     """
-    Get the subject and object curies from assertions, normalize and uniquify them, and then output to a gzipped TSV file according to KGX node format.
+    Get the subject and object curies from assertions, uniquifies the list,
+    and calls the SRI Node Normalizer service to get the dictionary.
 
     :param session: the database session.
-    :param output_filename: filepath for the output file.
     :param use_uniprot: whether to translate the PR curies to UniProt (curies with no UniProt equivalent will be excluded)
+    :returns a tuple containing the list of unique curies and the normalization dictionary.
     """
-    logging.info("Starting node output")
+    logging.info("Getting node data")
     logging.info(f"Mode: {'UniProt' if use_uniprot else 'PR'}")
     if use_uniprot:
         curies = [row[0] for row in session.query(sqlalchemy.text('DISTINCT IFNULL(uniprot, subject_curie) as curie FROM assertion LEFT JOIN pr_to_uniprot ON subject_curie = pr AND taxon = "NCBITaxon:9606"')).all()]
@@ -109,31 +110,44 @@ def write_nodes(session: sqlalchemy.orm.Session, output_filename: str, use_unipr
         curies.extend([row[0] for row in session.query(sqlalchemy.text('DISTINCT object_curie FROM assertion')).all()])
     curies = list(set(curies))
     logging.info(f'node curies retrieved and uniquified ({len(curies)})')
-    global sri_normalized_nodes
     if use_uniprot:
         curies = [curie for curie in curies if not curie.startswith('PR:')]
-    if len(curies) > 10000:
-        sri_normalized_nodes = services.get_normalized_nodes_by_parts(curies, sublist_size=5000)
-    else:
-        sri_normalized_nodes = services.get_normalized_nodes(curies)
+    normalized_nodes = services.get_normalized_nodes(curies)
+    return (curies, normalized_nodes)
+
+
+def write_nodes(curies: list[str], normalize_dict: dict[str, dict], output_filename: str) -> dict:
+    """
+    Output the node data to a gzipped TSV file according to KGX node format.
+
+    :param curies: the list of node curies.
+    :param normalize_dict: the dictionary containing normalization information for the node curies.
+    :param output_filename: filepath for the output file.
+    :returns a metadata dictionary for the nodes that were written to file.
+    """
+    logging.info("Starting node output")
+    metadata_dict = {}
     with gzip.open(output_filename, 'wb') as outfile:
-        for node in get_kgx_nodes(curies, sri_normalized_nodes):
+        for node in get_kgx_nodes(curies, normalize_dict):
             if len(node) == 0:
                 continue
             line = '\t'.join(node) + '\n'
             outfile.write(line.encode('utf-8'))
-            update_node_metadata(node)
+            metadata_dict = update_node_metadata(node, metadata_dict)
     logging.info('Node output complete')
+    return metadata_dict
 
 
-def write_edges(session: sqlalchemy.orm.Session, output_filename: str, use_uniprot: bool=False, limit: int=0) -> None:
+def write_edges(session: sqlalchemy.orm.Session, normalize_dict: dict[str, dict], output_filename: str, use_uniprot: bool=False, limit: int=0) -> None:
     """
     Get the edge (or edges) associated with each assertion and output them to a gzipped TSV file according to KGX edge format.
 
     :param session: the database session.
+    :param normalize_dict: the dictionary containing normalization information for checking the nodes associated with each edge.
     :param output_filename: filepath for the output file.
     :param use_uniprot: whether to translate the PR curies to UniProt (curies with no UniProt equivalent will be excluded)
     :param limit: the maximum number of supporting study results per edge to include in the JSON blob (0 is no limit)
+    :returns a metadata dictionary for the edges that were written to file.
     """
     logging.info("Starting edge output")
     logging.info(f"Mode: {'UniProt' if use_uniprot else 'PR'}")
@@ -145,6 +159,7 @@ def write_edges(session: sqlalchemy.orm.Session, output_filename: str, use_unipr
     assertion_query = sqlalchemy.select(models.Assertion)\
         .filter(models.Assertion.assertion_id.notin_(evaluation_subquery))\
         .execution_options(stream_results=True)
+    metadata_dict = {}
     with gzip.open(output_filename, 'wb') as outfile:
         for partition_number in range(0, partition_count):
             for assertion, in session.execute(assertion_query.offset(partition_number * ROW_BATCH_SIZE).limit(ROW_BATCH_SIZE)):
@@ -155,21 +170,30 @@ def write_edges(session: sqlalchemy.orm.Session, output_filename: str, use_unipr
                 for edge in edges:
                     if len(edge) == 0:
                         continue
-                    if not (is_normal(edge[0], sri_normalized_nodes) and is_normal(edge[2], sri_normalized_nodes)):
+                    if not (is_normal(edge[0], normalize_dict) and is_normal(edge[2], normalize_dict)):
                         continue
                     line = '\t'.join(str(val) for val in edge) + '\n'
                     outfile.write(line.encode('utf-8'))
-                    update_edge_metadata(edge)
+                    metadata_dict = update_edge_metadata(edge, metadata_dict, normalize_dict)
             outfile.flush()
             logging.info(f"Done with partition {partition_number}")
     logging.info("Edge output complete")
+    return metadata_dict
 
 
-def create_kge_tarball(dir: str):
+def create_kge_tarball(dir: str, node_metadata: dict, edge_metadata: dict):
     logging.info("Starting KGE tarball creation")
     node_file = os.path.join(dir, "nodes.tsv")
     edge_file = os.path.join(dir, "edges.tsv")
     metadata_file = os.path.join(dir, "content_metadata.json")
+
+    metadata_dict = {
+        "nodes": node_metadata,
+        "edges": list(edge_metadata.values())
+    }
+    logging.info("Writing metadata file")
+    with open(metadata_file, 'w') as outfile:
+        outfile.write(json.dumps(metadata_dict))
 
     # We extract the files from gzip if they are not already in the temp directory
     if not (os.path.isfile(node_file) and os.path.isfile(edge_file)):
@@ -186,18 +210,11 @@ def create_kge_tarball(dir: str):
                 shutil.copyfileobj(file_in, file_out)
         logging.info("Extraction complete")
 
-    metadata_dict = {
-        "nodes": node_metadata,
-        "edges": list(edge_metadata.values())
-    }
-    logging.info("Writing metadata file")
-    with open(metadata_file, 'w') as outfile:
-        outfile.write(json.dumps(metadata_dict))
     logging.info("Creating tarball")
     shutil.make_archive('targeted_assertions', 'gztar', root_dir=dir)
 
 
-def export_kg(session: sqlalchemy.orm.Session, bucket: str, blob_prefix: str, use_uniprot: bool=False, edge_limit: int=0) -> None:
+def export_kg(session: sqlalchemy.orm.Session, bucket: str, blob_prefix: str, use_uniprot: bool=False, edge_limit: int=0) -> None: # pragma: no cover
     """
     Create and upload the node and edge KGX files for targeted assertions.
 
@@ -207,11 +224,12 @@ def export_kg(session: sqlalchemy.orm.Session, bucket: str, blob_prefix: str, us
     :param use_uniprot: whether to translate the PR curies to UniProt (curies with no UniProt equivalent will be excluded)
     :param edge_limit: the maximum number of supporting study results per edge to include in the JSON blob (0 is no limit)
     """
-    write_nodes(session, "nodes.tsv.gz", use_uniprot=use_uniprot)
+    (node_curies, normal_dict) = get_node_data(session, use_uniprot=use_uniprot)
+    node_metadata = write_nodes(node_curies, normal_dict, "nodes.tsv.gz")
     services.upload_to_gcp(bucket, 'nodes.tsv.gz', f"{blob_prefix}nodes.tsv.gz")
-    write_edges(session, "edges.tsv.gz", use_uniprot=use_uniprot, limit=edge_limit)
+    edge_metadata = write_edges(session, normal_dict, "edges.tsv.gz", use_uniprot=use_uniprot, limit=edge_limit)
     services.upload_to_gcp(bucket, 'edges.tsv.gz', f"{blob_prefix}edges.tsv.gz")
     if not os.path.isdir('tmp'):
         os.mkdir('tmp')
-    create_kge_tarball('tmp')
+    create_kge_tarball('tmp', node_metadata, edge_metadata)
     services.upload_to_gcp(bucket, 'targeted_assertions.tar.gz', f"{blob_prefix}targeted_assertions.tar.gz")
