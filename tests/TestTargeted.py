@@ -267,6 +267,8 @@ class TargetedTestCase(unittest.TestCase):
 
     def test_write_nodes(self):
         curies = ['CHEBI:24433', 'PR:000000015', 'PR:000000016', 'UniProtKB:P19883']
+        if not os.path.isdir('out'):
+            os.mkdir('out')
         node_metadata = targeted.write_nodes(curies, self.normalized_nodes, 'out/test_nodes.tsv.gz')
         self.assertTrue(os.path.isfile("out/test_nodes.tsv.gz"))
         self.assertTrue(len(node_metadata) > 0)
@@ -281,6 +283,8 @@ class TargetedTestCase(unittest.TestCase):
                 "id": {"label": f"label:{num_part}"},
                 "type": [f"biolink:{num_part}"]
             }
+        if not os.path.isdir('out'):
+            os.mkdir('out')
         edge_metadata = targeted.write_edges(self.session, normal_dict, "out/test_edges.tsv.gz")
         self.assertTrue(os.path.isfile("out/test_edges.tsv.gz"))
         self.assertTrue(len(edge_metadata) > 0)
@@ -295,6 +299,8 @@ class TargetedTestCase(unittest.TestCase):
                 "id": {"label": f"label:{num_part}"},
                 "type": [f"biolink:{num_part}"]
             }
+        if not os.path.isdir('out'):
+            os.mkdir('out')
         edge_metadata = targeted.write_edges(self.session, normal_dict, "out/test_edges.tsv.gz", use_uniprot=True)
         self.assertTrue(os.path.isfile("out/test_edges.tsv.gz"))
         self.assertTrue(len(edge_metadata) > 0)

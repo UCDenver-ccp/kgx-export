@@ -183,6 +183,8 @@ def write_edges(session: sqlalchemy.orm.Session, normalize_dict: dict[str, dict]
 
 def create_kge_tarball(dir: str, node_metadata: dict, edge_metadata: dict):
     logging.info("Starting KGE tarball creation")
+    if not os.path.isdir(dir):
+        os.mkdir(dir)
     node_file = os.path.join(dir, "nodes.tsv")
     edge_file = os.path.join(dir, "edges.tsv")
     metadata_file = os.path.join(dir, "content_metadata.json")
@@ -229,7 +231,5 @@ def export_kg(session: sqlalchemy.orm.Session, bucket: str, blob_prefix: str, us
     services.upload_to_gcp(bucket, 'nodes.tsv.gz', f"{blob_prefix}nodes.tsv.gz")
     edge_metadata = write_edges(session, normal_dict, "edges.tsv.gz", use_uniprot=use_uniprot, limit=edge_limit)
     services.upload_to_gcp(bucket, 'edges.tsv.gz', f"{blob_prefix}edges.tsv.gz")
-    if not os.path.isdir('tmp'):
-        os.mkdir('tmp')
     create_kge_tarball('tmp', node_metadata, edge_metadata)
     services.upload_to_gcp(bucket, 'targeted_assertions.tar.gz', f"{blob_prefix}targeted_assertions.tar.gz")
