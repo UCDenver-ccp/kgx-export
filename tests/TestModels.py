@@ -12,8 +12,8 @@ class ModelTestCase(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None: # pragma: no cover
-        if '\\tests' not in os.getcwd():
-            os.chdir(f'{os.getcwd()}\\tests')
+        if 'tests' not in os.getcwd():
+            os.chdir(f'{os.getcwd()}/tests')
 
     def setUp(self):
         self.engine = create_engine('sqlite:///:memory:')
