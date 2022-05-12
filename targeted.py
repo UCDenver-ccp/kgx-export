@@ -10,85 +10,9 @@ import models
 import services
 import sqlalchemy
 
-ROW_BATCH_SIZE = 50000
+ROW_BATCH_SIZE = 40000
 HUMAN_TAXON = 'NCBITaxon:9606'
-
-
-def update_node_metadata(node: list[str], node_metadata_dict: dict) -> dict:
-    category = node[2]
-    prefix = node[0].split(':')[0]
-    if category in node_metadata_dict:
-        if prefix not in node_metadata_dict[category]["id_prefixes"]:
-            node_metadata_dict[category]["id_prefixes"].append(prefix)
-        node_metadata_dict[category]["count"] += 1
-        node_metadata_dict[category]["count_by_source"]["original_knowledge_source"]["infores:text-mining-provider-targeted"] += 1
-    else:
-        node_metadata_dict[category] = {
-            "id_prefixes": [prefix],
-            "count": 1,
-            "count_by_source": {
-                "original_knowledge_source": {
-                    "infores:text-mining-provider-targeted": 1
-                }
-            }
-        }
-    return node_metadata_dict
-
-
-def update_edge_metadata(edge: list, edge_metadata_dict: dict, node_dict: dict) -> dict:
-    object_category = get_category(edge[0], normalized_nodes=node_dict)
-    subject_category = get_category(edge[2], normalized_nodes=node_dict)
-    triple = f"{object_category}|{edge[1]}|{subject_category}"
-    relation = edge[4]
-    if triple in edge_metadata_dict:
-        if relation not in edge_metadata_dict[triple]["relations"]:
-            edge_metadata_dict[triple]["relations"].append(relation)
-        edge_metadata_dict[triple]["count"] += 1
-        edge_metadata_dict[triple]["count_by_source"]["original_knowledge_source"]["infores:text-mining-provider-targeted"] += 1
-    else:
-        edge_metadata_dict[triple] = {
-            "subject": subject_category,
-            "predicate": edge[1],
-            "object": object_category,
-            "relations": [relation],
-            "count": 1,
-            "count_by_source": {
-                "original_knowledge_source": {
-                    "infores:text-mining-provider-targeted": 1
-                }
-            }
-        }
-    return edge_metadata_dict
-
-
-def get_category(curie: str, normalized_nodes: dict[str, dict]) -> str:
-    category = 'biolink:SmallMolecule' if curie.startswith('DRUGBANK') else 'biolink:NamedThing'
-    if curie in normalized_nodes and normalized_nodes[curie] is not None and 'type' in normalized_nodes[curie]:
-        category = normalized_nodes[curie]["type"][0]
-    return category
-
-
-def is_normal(curie: str, normalized_nodes: dict[str, dict]) -> bool:
-    return curie in normalized_nodes and normalized_nodes[curie] is not None and \
-           'id' in normalized_nodes[curie] and 'label' in normalized_nodes[curie]['id']
-
-
-def get_kgx_nodes(curies: list[str], normalized_nodes: dict[str, dict]) -> Iterator[list[str]]:
-    """
-    Get the KGX node representation of a curie
-
-    :param curies: the list of curies to turn into KGX nodes
-    :param normalized_nodes: a dictionary of normalized nodes, for retrieving canonical label and category
-    """
-    for curie in curies:
-        category = 'biolink:SmallMolecule' if curie.startswith('DRUGBANK') else 'biolink:NamedThing'
-        if is_normal(curie, normalized_nodes):
-            name = normalized_nodes[curie]['id']['label']
-            if 'type' in normalized_nodes[curie]:
-                category = normalized_nodes[curie]['type'][0]
-            yield [curie, name, category]
-        else:
-            yield []
+ORIGINAL_KNOWLEDGE_SOURCE = "infores:text-mining-provider-targeted"
 
 
 def get_node_data(session: sqlalchemy.orm.Session, use_uniprot: bool=False) -> (list[str], dict[str, dict]):
@@ -128,12 +52,12 @@ def write_nodes(curies: list[str], normalize_dict: dict[str, dict], output_filen
     logging.info("Starting node output")
     metadata_dict = {}
     with gzip.open(output_filename, 'wb') as outfile:
-        for node in get_kgx_nodes(curies, normalize_dict):
+        for node in services.get_kgx_nodes(curies, normalize_dict):
             if len(node) == 0:
                 continue
             line = '\t'.join(node) + '\n'
             outfile.write(line.encode('utf-8'))
-            metadata_dict = update_node_metadata(node, metadata_dict)
+            metadata_dict = services.update_node_metadata(node, metadata_dict, ORIGINAL_KNOWLEDGE_SOURCE)
     logging.info('Node output complete')
     return metadata_dict
 
@@ -170,11 +94,11 @@ def write_edges(session: sqlalchemy.orm.Session, normalize_dict: dict[str, dict]
                 for edge in edges:
                     if len(edge) == 0:
                         continue
-                    if not (is_normal(edge[0], normalize_dict) and is_normal(edge[2], normalize_dict)):
+                    if not (services.is_normal(edge[0], normalize_dict) and services.is_normal(edge[2], normalize_dict)):
                         continue
                     line = '\t'.join(str(val) for val in edge) + '\n'
                     outfile.write(line.encode('utf-8'))
-                    metadata_dict = update_edge_metadata(edge, metadata_dict, normalize_dict)
+                    metadata_dict = services.update_edge_metadata(edge, metadata_dict, normalize_dict, ORIGINAL_KNOWLEDGE_SOURCE)
             outfile.flush()
             logging.info(f"Done with partition {partition_number}")
     logging.info("Edge output complete")

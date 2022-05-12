@@ -4,11 +4,12 @@ import logging
 import os
 import csv
 import sqlalchemy
+from typing import Iterator
 
 from google.cloud import storage
 
 
-def get_normalized_nodes(curie_list: list[str]) -> dict:
+def get_normalized_nodes(curie_list: list[str]) -> dict: # pragma: no cover
     """
     Use the SRI Node Normalization service to get detailed node information from curies
 
@@ -28,7 +29,7 @@ def get_normalized_nodes(curie_list: list[str]) -> dict:
     return {}
 
 
-def get_normalized_nodes_by_parts(curie_list: list[str], sublist_size: int=1000) -> dict:
+def get_normalized_nodes_by_parts(curie_list: list[str], sublist_size: int=1000) -> dict: # pragma: no cover
     """
     Use the SRI Node Normalization service to get detailed node information from curies, with a maxiumum number of curies per HTTP call
 
@@ -53,7 +54,7 @@ def get_normalized_nodes_by_parts(curie_list: list[str], sublist_size: int=1000)
     return nodes
 
 
-def upload_to_gcp(bucket_name: str, source_file_name: str, destination_blob_name: str, delete_source_file: bool=False) -> None:
+def upload_to_gcp(bucket_name: str, source_file_name: str, destination_blob_name: str, delete_source_file: bool=False) -> None: # pragma: no cover
     """
     Upload a file to the specified GCP Bucket with the given blob name.
 
@@ -71,7 +72,7 @@ def upload_to_gcp(bucket_name: str, source_file_name: str, destination_blob_name
         os.remove(source_file_name)
 
 
-def get_from_gcp(bucket_name: str, blob_name: str, destination_file_name: str) -> None:
+def get_from_gcp(bucket_name: str, blob_name: str, destination_file_name: str) -> None: # pragma: no cover
     client = storage.Client()
     bucket = client.bucket(bucket_name)
     logging.info(f'Downloading {blob_name} to {destination_file_name}')
@@ -79,57 +80,111 @@ def get_from_gcp(bucket_name: str, blob_name: str, destination_file_name: str) -
     blob.download_to_filename(destination_file_name)
 
 
-def compose_gcp_files(bucket_name: str, directory: str, file_prefix: str, new_file_name: str) -> None:
+def update_node_metadata(node: list[str], node_metadata_dict: dict, source: str) -> dict:
     """
-    Merge files in a Google Storage bucket
+    Updates a node metadata dictionary with information from a single node
 
-    :param bucket_name: the bucket containing the files to be merged
-    :param directory: the directory prefix within the bucket
-    :param file_prefix: the common prefix of the files to be merged
-    :param new_file_name: the name of the new file to be created/replaced
+    :param node: the node to add to the dictionary
+    :param node_metadata_dict: the metadata dictionary
+    :param source: the original knowledge source
+    :returns the updated node metadata dictionary
     """
-    client = storage.Client()
-    bucket = client.bucket(bucket_name)
-    new_file_blob = bucket.blob(f"{directory}{new_file_name}")
-    if new_file_blob.exists():
-        logging.info(f"Deleting existing file {directory}{new_file_name}")
-        new_file_blob.delete()
-    logging.info(f"Composing '{file_prefix}' files in '{directory}' into {new_file_name}")
-    matching_files = client.list_blobs(bucket, prefix=f"{directory}{file_prefix}")
-    new_file_blob.compose([blob for blob in matching_files])
+    category = node[2]
+    prefix = node[0].split(':')[0]
+    if category in node_metadata_dict:
+        if prefix not in node_metadata_dict[category]["id_prefixes"]:
+            node_metadata_dict[category]["id_prefixes"].append(prefix)
+        node_metadata_dict[category]["count"] += 1
+        node_metadata_dict[category]["count_by_source"]["original_knowledge_source"][source] += 1
+    else:
+        node_metadata_dict[category] = {
+            "id_prefixes": [prefix],
+            "count": 1,
+            "count_by_source": {
+                "original_knowledge_source": {
+                    source: 1
+                }
+            }
+        }
+    return node_metadata_dict
 
 
-def remove_temp_files(bucket_name: str, file_list: list[str]) -> None:
+def update_edge_metadata(edge: list, edge_metadata_dict: dict, node_dict: dict, source: str) -> dict:
     """
-    Delete a list of files from a Google Storage bucket
+    Updates an edge metadata dictionary with information from a single edge
 
-    :param bucket_name: the name of the bucket
-    :param file_list: the list of filenames to delete
+    :param edge: the edge to add to the dictionary
+    :param edge_metadata_dict: the metadata dictionary
+    :param node_dict: the normalization dictionary
+    :param source: the original knowledge source
+    :returns the updated edge metadata dictionary
     """
-    client = storage.Client()
-    bucket = client.bucket(bucket_name)
-    for filename in file_list:
-        temp_blob = bucket.blob(filename)
-        if temp_blob.exists():
-            logging.info(f"Deleting {filename}")
-            temp_blob.delete()
+    object_category = get_category(edge[0], normalized_nodes=node_dict)
+    subject_category = get_category(edge[2], normalized_nodes=node_dict)
+    triple = f"{object_category}|{edge[1]}|{subject_category}"
+    relation = edge[4]
+    if triple in edge_metadata_dict:
+        if relation not in edge_metadata_dict[triple]["relations"]:
+            edge_metadata_dict[triple]["relations"].append(relation)
+        edge_metadata_dict[triple]["count"] += 1
+        edge_metadata_dict[triple]["count_by_source"]["original_knowledge_source"][source] += 1
+    else:
+        edge_metadata_dict[triple] = {
+            "subject": subject_category,
+            "predicate": edge[1],
+            "object": object_category,
+            "relations": [relation],
+            "count": 1,
+            "count_by_source": {
+                "original_knowledge_source": {
+                    source: 1
+                }
+            }
+        }
+    return edge_metadata_dict
+
+
+def get_category(curie: str, normalized_nodes: dict[str, dict]) -> str:
+    """
+    Retrieves the category of the given curie, as determined by the normalized dictionary (with some default values)
+
+    :param curie: the curie
+    :param normalized_nodes: the normalization dictionary
+    :returns the category of the curie
+    """
+    category = 'biolink:SmallMolecule' if curie.startswith('DRUGBANK') else 'biolink:NamedThing'
+    if curie in normalized_nodes and normalized_nodes[curie] is not None and 'type' in normalized_nodes[curie]:
+        category = normalized_nodes[curie]["type"][0]
+    return category
+
+
+def is_normal(curie: str, normalized_nodes: dict[str, dict]) -> bool:
+    """
+    Determines if the given curie exists in the given normalized dictionary and has the necessary fields populated
+
+    :param curie: the curie
+    :param normalized_nodes: the normalization dictionary
+    :returns true if the curie exists and is useable, false otherwise
+    """
+    return curie in normalized_nodes and normalized_nodes[curie] is not None and \
+           'id' in normalized_nodes[curie] and 'label' in normalized_nodes[curie]['id'] and \
+           (not curie.startswith('CHEBI') or \
+           'biolink:SmallMolecule' == normalized_nodes[curie]['type'][0] if 'type' in normalized_nodes[curie] else 'biolink:NamedThing')
+
+
+def get_kgx_nodes(curies: list[str], normalized_nodes:dict[str, dict]) -> Iterator[list[str]]:
+    """
+    Get the KGX node representation of a curie
+
+    :param curies: the list of curies to turn into KGX nodes
+    :param normalized_nodes: a dictionary of normalized nodes, for retrieving canonical label and category
+    """
+    for curie in curies:
+        category = 'biolink:SmallMolecule' if curie.startswith('DRUGBANK') else 'biolink:NamedThing'
+        if is_normal(curie, normalized_nodes):
+            name = normalized_nodes[curie]['id']['label']
+            if 'type' in normalized_nodes[curie]:
+                category = normalized_nodes[curie]['type'][0]
+            yield [curie, name, category]
         else:
-            logging.warn(f"Could not find file for deletion: {filename}")
-
-
-def insert_dictionary_records(session):
-    from models import PRtoUniProt
-    with open('in/pr-to-uniprot.tsv', 'r') as infile:
-        csv_reader = csv.reader(infile, 'excel-tab')
-        buffer = []
-        for row in csv_reader:
-            buffer.append({
-                'pr': row[0],
-                'uniprot': row[1],
-                'taxon': row[2]
-            })
-            if len(buffer) % 10000 == 0:
-                session.bulk_insert_mappings(PRtoUniProt, buffer)
-                buffer = []
-        session.bulk_insert_mappings(PRtoUniProt, buffer)
-    session.commit()
+            yield []

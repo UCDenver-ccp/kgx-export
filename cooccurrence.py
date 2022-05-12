@@ -5,7 +5,7 @@ import shutil
 import json
 import os
 import csv
-from typing import Iterator
+from typing import Iterator, NamedTuple
 
 import models
 import services
@@ -13,92 +13,22 @@ import sqlalchemy
 
 ROW_BATCH_SIZE = 500000
 HUMAN_TAXON = 'NCBITaxon:9606'
+ORIGINAL_KNOWLEDGE_SOURCE = "infores:text-mining-provider-cooccurrence"
 output_dir = 'out_c'
 nodes_filename = os.path.join(output_dir, 'nodes.tsv.gz')
 edges_filename = os.path.join(output_dir, 'edges.tsv.gz')
 pairs_filename = os.path.join(output_dir, 'pairs.txt')
-node_metadata = {}
-edge_metadata = {}
 sri_normalized_nodes = {}
 
 
-def update_node_metadata(node: list[str], node_metadata_dict: dict) -> dict:
-    category = node[2]
-    prefix = node[0].split(':')[0]
-    if category in node_metadata_dict:
-        if prefix not in node_metadata_dict[category]["id_prefixes"]:
-            node_metadata_dict[category]["id_prefixes"].append(prefix)
-        node_metadata_dict[category]["count"] += 1
-        node_metadata_dict[category]["count_by_source"]["original_knowledge_source"]["infores:text-mining-provider-cooccurrence"] += 1
-    else:
-        node_metadata_dict[category] = {
-            "id_prefixes": [prefix],
-            "count": 1,
-            "count_by_source": {
-                "original_knowledge_source": {
-                    "infores:text-mining-provider-cooccurrence": 1
-                }
-            }
-        }
-    return node_metadata_dict
-
-
-def update_edge_metadata(edge: list, edge_metadata_dict: dict, node_dict: dict) -> dict:
-    object_category = get_category(edge[0], normalized_nodes=node_dict)
-    subject_category = get_category(edge[2], normalized_nodes=node_dict)
-    triple = f"{object_category}|{edge[1]}|{subject_category}"
-    relation = edge[4]
-    if triple in edge_metadata_dict:
-        if relation not in edge_metadata_dict[triple]["relations"]:
-            edge_metadata_dict[triple]["relations"].append(relation)
-        edge_metadata_dict[triple]["count"] += 1
-        edge_metadata_dict[triple]["count_by_source"]["original_knowledge_source"]["infores:text-mining-provider-cooccurrence"] += 1
-    else:
-        edge_metadata_dict[triple] = {
-            "subject": subject_category,
-            "predicate": edge[1],
-            "object": object_category,
-            "relations": [relation],
-            "count": 1,
-            "count_by_source": {
-                "original_knowledge_source": {
-                    "infores:text-mining-provider-cooccurrence": 1
-                }
-            }
-        }
-    return edge_metadata_dict
-
-
-def get_category(curie: str, normalized_nodes: dict[str, dict]) -> str:
-    category = 'biolink:SmallMolecule' if curie.startswith('DRUGBANK') else 'biolink:NamedThing'
-    if curie in normalized_nodes and normalized_nodes[curie] is not None:
-        category = normalized_nodes[curie]["type"][0]
-    return category
-
-
-def is_normal(curie: str, normalized_nodes: dict[str, dict]) -> bool:
-    return curie in normalized_nodes and normalized_nodes[curie] is not None and \
-           'id' in normalized_nodes[curie] and 'label' in normalized_nodes[curie]['id']
-
-
-def get_kgx_nodes(curies: list[str], normalized_nodes:dict[str, dict]) -> Iterator[list[str]]:
-    """
-    Get the KGX node representation of a curie
-
-    :param curies: the list of curies to turn into KGX nodes
-    :param normalized_nodes: a dictionary of normalized nodes, for retrieving canonical label and category
-    """
-    for curie in curies:
-        category = 'biolink:SmallMolecule' if curie.startswith('DRUGBANK') else 'biolink:NamedThing'
-        if is_normal(curie, normalized_nodes):
-            name = normalized_nodes[curie]['id']['label']
-            if 'type' in normalized_nodes[curie]:
-                category = normalized_nodes[curie]['type'][0]
-            yield [curie, name, category]
-        yield []
-
-
 def generate_metadata(nodes_filename: str, edges_filename: str, compressed: bool=True) -> dict:
+    """
+    Creates a metadata dictionary for existing nodes and edges files in KGX format
+
+    :param nodes_filename: the file path for the nodes KGX file
+    :param edges_filename: the file path for the edges KGX file
+    :returns the full metadata dictionary
+    """
     nodes_metadata_dict = {}
     edges_metadata_dict = {}
     node_curies = []
@@ -110,7 +40,7 @@ def generate_metadata(nodes_filename: str, edges_filename: str, compressed: bool
     reader = csv.reader(nodes_file, delimiter='\t')
     for node in reader:
         node_curies.append(node[0])
-        nodes_metadata_dict = update_node_metadata(node, nodes_metadata_dict)
+        nodes_metadata_dict = services.update_node_metadata(node, nodes_metadata_dict, ORIGINAL_KNOWLEDGE_SOURCE)
     nodes_file.close()
     logging.info("Node metadata end")
     normalized_nodes = services.get_normalized_nodes(node_curies)
@@ -121,7 +51,7 @@ def generate_metadata(nodes_filename: str, edges_filename: str, compressed: bool
         edges_file = open(edges_filename, 'r')
     reader = csv.reader(edges_file, delimiter='\t')
     for edge in reader:
-        edges_metadata_dict = update_edge_metadata(edge, edges_metadata_dict, normalized_nodes)
+        edges_metadata_dict = services.update_edge_metadata(edge, edges_metadata_dict, normalized_nodes, ORIGINAL_KNOWLEDGE_SOURCE)
     edges_file.close()
     logging.info("Edge metadata end")
     return {
@@ -130,7 +60,7 @@ def generate_metadata(nodes_filename: str, edges_filename: str, compressed: bool
     }
 
 
-def write_nodes(session: sqlalchemy.orm.Session, outfile: str, use_uniprot: bool=False) -> None:
+def write_nodes(session: sqlalchemy.orm.Session, outfile: str, use_uniprot: bool=False) -> (dict, dict[str, dict]):
     """
     Get the subject and object curies from cooccurrences, normalize and uniquify them, and then output to a gzipped TSV file according to KGX node format.
 
@@ -178,29 +108,40 @@ def write_nodes(session: sqlalchemy.orm.Session, outfile: str, use_uniprot: bool
             curies = list(set(curies))
     curies = list(set(curies))
     logging.info(f'unique node curies retrieved and uniquified ({len(curies)})')
-    global sri_normalized_nodes
+    normalized_nodes = {}
     if use_uniprot:
         curies = [curie for curie in curies if not curie.startswith('PR:')]
     if len(curies) > 10000:
-        sri_normalized_nodes = services.get_normalized_nodes_by_parts(curies, sublist_size=5000)
+        normalized_nodes = services.get_normalized_nodes_by_parts(curies, sublist_size=15000)
     else:
-        sri_normalized_nodes = services.get_normalized_nodes(curies)
+        normalized_nodes = services.get_normalized_nodes(curies)
+    metadata_dict = {}
     with gzip.open(outfile, 'wb') as output:
-        for node in get_kgx_nodes(curies, sri_normalized_nodes):
+        for node in services.get_kgx_nodes(curies, normalized_nodes):
             if len(node) == 0:
                 continue
             line = '\t'.join(node) + '\n'
             output.write(line.encode('utf-8'))
-            update_node_metadata(node)
+            metadata_dict = services.update_node_metadata(node, metadata_dict, ORIGINAL_KNOWLEDGE_SOURCE)
     logging.info('Node output complete')
+    return (metadata_dict, normalized_nodes)
 
 
-def write_edges(session: sqlalchemy.orm.Session, filename: str, use_uniprot: bool=False) -> None:
+def write_edges(session: sqlalchemy.orm.Session, normalize_dict: dict[str, dict], output_filename: str, use_uniprot: bool=False) -> dict:
+    """
+    Get the edge (or edges) associated with each cooccurrence record and output them to a gzipped TSV file according to KGX edge format.
+
+    :param session: the database session.
+    :param normalize_dict: the dictionary containing normalization information for checking the nodes associated with each edge.
+    :param output_filename: file path for the output file.
+    :param use_uniprot: whether to translate the PR curies to UniProt (curies with no UniProt equivalent will be excluded)
+    :returns a metadata dictionary for the edges that were written to file.
+    """
     logging.info('Starting edge output')
     logging.info(f"Mode: {'UniProt' if use_uniprot else 'PR'}")
-    # count_query_string = sqlalchemy.select(sqlalchemy.text('COUNT(1) FROM cooccurrence c LEFT JOIN cooccurrence_scores cs ON cs.cooccurrence_id = c.cooccurrence_id'))
-    # record_count, = session.execute(count_query_string)
-    # logging.info(f'Total edge records to export: {record_count}')
+    count_query_string = sqlalchemy.select(sqlalchemy.text('COUNT(1) FROM cooccurrence'))
+    record_count, = session.execute(count_query_string)
+    logging.info(f'Total cooccurrence records to export: {record_count} (note: final edge count will probably be different.')
     if use_uniprot:
         data_query_string = sqlalchemy.select(sqlalchemy.text(
             """
@@ -236,7 +177,8 @@ def write_edges(session: sqlalchemy.orm.Session, filename: str, use_uniprot: boo
         )).execution_options(stream_results=True)
     x = 0
     pair_set = set()
-    with gzip.open(filename, 'wb') as outfile:
+    edge_metadata = {}
+    with gzip.open(output_filename, 'wb') as outfile:
         for row in session.execute(data_query_string).yield_per(ROW_BATCH_SIZE):
             x += 1
             if x % (ROW_BATCH_SIZE / 4) == 0:
@@ -244,7 +186,7 @@ def write_edges(session: sqlalchemy.orm.Session, filename: str, use_uniprot: boo
             edge = get_edge_kgx(row, use_uniprot=use_uniprot)
             if len(edge) == 0:
                 continue
-            if not (is_normal(edge[0], sri_normalized_nodes) and is_normal(edge[2], sri_normalized_nodes)):
+            if not (services.is_normal(edge[0], normalize_dict) and services.is_normal(edge[2], normalize_dict)):
                 continue
             c1 = edge[0].split(':')[0]
             c2 = edge[2].split(':')[0]
@@ -255,15 +197,22 @@ def write_edges(session: sqlalchemy.orm.Session, filename: str, use_uniprot: boo
             pair_set.add(pair)
             line = '\t'.join(edge) + '\n'
             outfile.write(line.encode('utf-8'))
-            update_edge_metadata(edge)
+            edge_metadata = services.update_edge_metadata(edge, edge_metadata, normalize_dict, ORIGINAL_KNOWLEDGE_SOURCE)
     with open(pairs_filename, 'w') as outfile:
         for pair in pair_set:
             outfile.write(pair + '\n')
     logging.info('Edge output complete')
+    return edge_metadata
 
 
+def get_edge_kgx(row: dict, use_uniprot=False) -> list:
+    """
+    Formats a database row as a list in KGX format
 
-def get_edge_kgx(row: list, use_uniprot=False) -> list:
+    :param row: the database query result row
+    :param use_uniprot: whether to skip edges containing PR curies or non-human taxons
+    :returns a list containing the KGX format columns, or an empty list if the edge has been excluded by use_uniprot
+    """
     if use_uniprot:
         if row['curie1'].startswith('PR:') or row['curie2'].startswith('PR:'):
             return []
@@ -275,7 +224,13 @@ def get_edge_kgx(row: list, use_uniprot=False) -> list:
             'biolink:Association', f"tmkp:{row['cooccurrence_id']}_{row['level']}", json.dumps(get_json_attributes(row))]
 
 
-def get_json_attributes(row: list):
+def get_json_attributes(row: dict) -> list:
+    """
+    Creates the JSON Blob for the edge KGX output
+
+    :param row: the database query result row
+    :returns a list conforming to the _attributes JSON Blob format
+    """
     attributes_list = [
         {
             "attribute_type_id": "biolink:original_knowledge_source",
@@ -290,14 +245,18 @@ def get_json_attributes(row: list):
             "value_type_id": "biolink:InformationResource",
             "attribute_source": "infores:text-mining-provider-cooccurrence"
         },
-        score_to_json(row['cooccurrence_id'], row['level'], row['concept1_count'], row['concept2_count'],
-                      row['pair_count'], row['docstring'], float(row['ngd']), float(row['pmi']), float(row['pmi_norm']),
-                      float(row['mutual_dependence']), float(row['pmi_norm_max']), float(row['lfmd']))
+        scores_to_json(row['cooccurrence_id'], row['level'], row['concept1_count'], row['concept2_count'],
+                       row['pair_count'], row['docstring'], float(row['ngd']), float(row['pmi']), float(row['pmi_norm']),
+                       float(row['mutual_dependence']), float(row['pmi_norm_max']), float(row['lfmd']))
     ]
     return attributes_list
 
 
-def score_to_json(id, level, c1_count, c2_count, pair_count, docs, ngd, pmi, pmi_norm, mutual_dependence, pmi_norm_max, lfmd):
+def scores_to_json(id: str, level: str, c1_count: int, c2_count: int, pair_count: int, docs: str,
+                   ngd: float, pmi: float, pmi_norm: float, mutual_dependence: float, pmi_norm_max: float, lfmd: float):
+    """
+    Creates the JSON Blob attributes describing the various cooccurrence counts and scores
+    """
     biolink_level = 'biolink:DocumentLevelConceptCooccurrenceAnalysisResult'
     desc = 'a single result from computing cooccurrence metrics between two concepts that cooccur at the document level'
     if level == 'document':
@@ -330,25 +289,28 @@ def score_to_json(id, level, c1_count, c2_count, pair_count, docs, ngd, pmi, pmi
                 "attribute_type_id": "biolink:tmkp_concept1_count",
                 "value": c1_count,
                 "value_type_id": "SIO:000794",
-                "description": f"The number of times concept #1 was observed to occur at the {level} level in the documents that were processed"
+                "description": f"The number of times concept #1 was observed to occur at the {level} level in the documents that were processed",
+                "attribute_source": "infores:text-mining-provider-cooccurrence"
             },
             {
                 "attribute_type_id": "biolink:tmkp_concept2_count",
                 "value": c2_count,
                 "value_type_id": "SIO:000794",
-                "description": f"The number of times concept #2 was observed to occur at the {level} level in the documents that were processed"
+                "description": f"The number of times concept #2 was observed to occur at the {level} level in the documents that were processed",
+                "attribute_source": "infores:text-mining-provider-cooccurrence"
             },
             {
                 "attribute_type_id": "biolink:tmkp_concept_pair_count",
                 "value": pair_count,
                 "value_type_id": "SIO:000794",
-                "description": f"The number of times the concepts of this assertion were observed to cooccur at the {level} level in the documents that were processed"
+                "description": f"The number of times the concepts of this assertion were observed to cooccur at the {level} level in the documents that were processed",
+                "attribute_source": "infores:text-mining-provider-cooccurrence"
             },
             {
                 "attribute_type_id": "biolink:tmkp_normalized_google_distance",
                 "value": ngd,
                 "value_type_id": "EDAM:data_1772",
-                "description": f"The number of times the concepts of this assertion were observed to cooccur at the {level} level in the documents that were processed",
+                "description": "The normalized google distance score for the concepts in this assertion based on their cooccurrence in the documents that were processed",
                 "attribute_source": "infores:text-mining-provider-cooccurrence"
             },
             {
@@ -390,47 +352,15 @@ def score_to_json(id, level, c1_count, c2_count, pair_count, docs, ngd, pmi, pmi
     }
 
 
-def write_edges_compressed(session: sqlalchemy.orm.Session, output_filename: str, use_uniprot: bool=False) -> None:
+def create_kge_tarball(bucket: str, blob_prefix: str, node_metadata: dict, edge_metadata:dict) -> None:
     """
-    Get the edge (or edges) associated with each assertion and output them to a gzipped TSV file according to KGX edge format.
+    Repackages the node and edge files, together with a metadata file, into a single tarball for KGE
 
-    :param session: the database session.
-    :param output_filename: filepath for the output file.
-    :param use_uniprot: whether to translate the PR curies to UniProt (curies with no UniProt equivalent will be excluded)
+    :param bucket: the GCP bucket name, to download the files if they are not available locally
+    :param blob_prefix: the directory prefix for the files on GCP
+    :param node_metadata: the precalculated node metadata dictionary
+    :param edge_metadata: the precalculated edge metadata dictionary
     """
-    logging.info('Starting edge output')
-    logging.info(f"Mode: {'UniProt' if use_uniprot else 'PR'}")
-    cooccurrence_count = session.query(models.Cooccurrence).count()
-    partition_count = math.ceil(cooccurrence_count / ROW_BATCH_SIZE)
-    logging.info(f"Total Cooccurrence Records: {cooccurrence_count}")
-    logging.info(f"Total Partition Count: {partition_count}")
-    pair_set = set()
-    cooccurrence_query = sqlalchemy.select(models.Cooccurrence).execution_options(stream_results=True)
-    with gzip.open(output_filename, "wb") as outfile:
-        for partition_number in range(0, partition_count):
-            for cooccurrence, in session.execute(cooccurrence_query.offset(partition_number * ROW_BATCH_SIZE).limit(ROW_BATCH_SIZE)):
-                edge = cooccurrence.get_edge_kgx(use_uniprot)
-                if len(edge) == 0:
-                    continue
-                c1 = edge[0].split(':')[0]
-                c2 = edge[2].split(':')[0]
-                if c1 < c2:
-                    pair = f"{c1}:{c2}"
-                else:
-                    pair = f"{c2}:{c1}"
-                pair_set.add(pair)
-                line = '\t'.join(edge) + '\n'
-                outfile.write(line.encode('utf-8'))
-                update_edge_metadata(edge)
-            outfile.flush()
-            logging.info(f"Done with partition {partition_number}")
-    with open(pairs_filename, 'w') as outfile:
-        for pair in pair_set:
-            outfile.write(pair + '\n')
-    logging.info('Edge output complete')
-
-
-def create_kge_tarball(bucket: str, blob_prefix: str) -> None:
     if not os.path.isdir(output_dir):
         os.mkdir(output_dir)
     if not os.path.isdir('tmpc'):
@@ -470,7 +400,7 @@ def create_kge_tarball(bucket: str, blob_prefix: str) -> None:
     shutil.make_archive('cooccurrence', 'gztar', root_dir='tmpc')
 
 
-def export_kg(session: sqlalchemy.orm.Session, bucket: str, blob_prefix: str, use_uniprot: bool=False) -> None:
+def export_kg(session: sqlalchemy.orm.Session, bucket: str, blob_prefix: str, use_uniprot: bool=False) -> None: # pragma: no cover
     """
     Create and upload the node and edge KGX files for targeted assertions.
 
@@ -481,10 +411,10 @@ def export_kg(session: sqlalchemy.orm.Session, bucket: str, blob_prefix: str, us
     """
     if not os.path.isdir(output_dir):
         os.mkdir(output_dir)
-    write_nodes(session, nodes_filename, use_uniprot=use_uniprot)
+    (node_metadata, normal_dict) = write_nodes(session, nodes_filename, use_uniprot=use_uniprot)
     services.upload_to_gcp(bucket, nodes_filename, f'{blob_prefix}cooccurrence_nodes.tsv.gz')
-    write_edges(session, edges_filename, use_uniprot=use_uniprot)
+    edge_metadata = write_edges(session, normal_dict, edges_filename, use_uniprot=use_uniprot)
     services.upload_to_gcp(bucket, edges_filename, f'{blob_prefix}cooccurrence_edges.tsv.gz')
     services.upload_to_gcp(bucket, pairs_filename, f'{blob_prefix}cooccurrence_pairs.txt')
-    create_kge_tarball(bucket, blob_prefix)
+    create_kge_tarball(bucket, blob_prefix, node_metadata, edge_metadata)
     services.upload_to_gcp(bucket, 'cooccurrence.tar.gz', f"{blob_prefix}cooccurrence.tar.gz")
