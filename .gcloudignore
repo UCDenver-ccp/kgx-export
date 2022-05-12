@@ -6,6 +6,7 @@ README.md
 *.pyo
 *.pyd
 *.tsv
+*.csv
 __pycache__
 .pytest_cache
 
