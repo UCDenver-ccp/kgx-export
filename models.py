@@ -19,7 +19,8 @@ class Assertion(Model):
     subject_curie = Column(String(100), ForeignKey('pr_to_uniprot.pr'))
     object_curie = Column(String(100), ForeignKey('pr_to_uniprot.pr'))
     association_curie = Column(String(100))
-    evidence_list = relationship('Evidence', back_populates='assertion', lazy='subquery')
+    evidence_list = relationship('Evidence', back_populates='assertion', lazy='subquery',
+                                 primaryjoin='and_(Assertion.assertion_id==Evidence.assertion_id, Evidence.superseded_by.is_(None))')
     subject_uniprot = relationship('PRtoUniProt', foreign_keys=subject_curie, lazy='joined')
     object_uniprot = relationship('PRtoUniProt', foreign_keys=object_curie, lazy='joined')
 
@@ -80,6 +81,7 @@ class Assertion(Model):
 
     def get_edge_kgx(self, predicate, limit=0) -> list:
         relevant_evidence = [ev for ev in self.evidence_list if ev.get_top_predicate() == predicate]
+        evidence_count = len(relevant_evidence)
         if limit > 0:
             relevant_evidence = relevant_evidence[:limit]
         supporting_study_results = '|'.join([f'tmkp:{ev.evidence_id}' for ev in relevant_evidence])
@@ -89,7 +91,7 @@ class Assertion(Model):
             display_predicate = 'biolink:contributes_to'
         return [self.subject_curie, display_predicate, self.object_curie, self.assertion_id,
                 self.association_curie, self.get_aggregate_score(predicate), supporting_study_results, supporting_publications,
-                self.get_json_attributes(predicate, relevant_evidence)]
+                self.get_json_attributes(predicate, relevant_evidence, evidence_count)]
 
     def get_other_edges_kgx(self, limit=0) -> list:
         return [self.get_other_edge_kgx(predicate, limit) for predicate in self.get_predicates()]
@@ -102,6 +104,7 @@ class Assertion(Model):
         subject_id = self.subject_uniprot.uniprot if self.subject_uniprot else self.subject_curie
         object_id = self.object_uniprot.uniprot if self.object_uniprot else self.object_curie
         relevant_evidence = [ev for ev in self.evidence_list if ev.get_top_predicate() == predicate]
+        evidence_count = len(relevant_evidence)
         if limit > 0:
             relevant_evidence = relevant_evidence[:limit]
         supporting_study_results = '|'.join([f'tmkp:{ev.evidence_id}' for ev in relevant_evidence])
@@ -111,15 +114,17 @@ class Assertion(Model):
             display_predicate = 'biolink:contributes_to'
         return [subject_id, display_predicate, object_id, self.assertion_id, self.association_curie,
                 self.get_aggregate_score(predicate), supporting_study_results, supporting_publications,
-                self.get_json_attributes(predicate, relevant_evidence)]
+                self.get_json_attributes(predicate, relevant_evidence, evidence_count)]
 
-    def get_json_attributes(self, predicate, evidence_list) -> json:
+    def get_json_attributes(self, predicate, evidence_list, evidence_count=0) -> json:
+        if evidence_count == 0:
+            evidence_count = len(evidence_list)
         attributes_list = [
             {
                 "attribute_type_id": "biolink:original_knowledge_source",
                 "value": "infores:text-mining-provider-targeted",
                 "value_type_id": "biolink:InformationResource",
-                "description": "The Text Mining Provider Targeted Biolink Association KP from NCATS Translator provides text-mined assertions from the biomedical literature.",
+                # "description": "The Text Mining Provider Targeted Biolink Association KP from NCATS Translator provides text-mined assertions from the biomedical literature.",
                 "attribute_source": "infores:text-mining-provider-targeted"
             },
             {
@@ -130,23 +135,23 @@ class Assertion(Model):
             },
             {
                 "attribute_type_id": "biolink:has_evidence_count",
-                "value": len(evidence_list),
+                "value": evidence_count,
                 "value_type_id": "biolink:EvidenceCount",
-                "description": "The count of the number of sentences that assert this edge",
+                # "description": "The count of the number of sentences that assert this edge",
                 "attribute_source": "infores:text-mining-provider-targeted"
             },
             {
                 "attribute_type_id": "biolink:tmkp_confidence_score",
                 "value": self.get_aggregate_score(predicate),
                 "value_type_id": "biolink:ConfidenceLevel",
-                "description": "An aggregate confidence score that combines evidence from all sentences that support the edge",
+                # "description": "An aggregate confidence score that combines evidence from all sentences that support the edge",
                 "attribute_source": "infores:text-mining-provider-targeted"
             },
             {
                 "attribute_type_id": "biolink:supporting_document",
                 "value": '|'.join([ev.document_id for ev in evidence_list]),
                 "value_type_id": "biolink:Publication",
-                "description": "The document(s) that contains the sentence(s) that assert the Biolink association represented by the edge; pipe-delimited",
+                # "description": "The document(s) that contains the sentence(s) that assert the Biolink association represented by the edge; pipe-delimited",
                 "attribute_source": "infores:pubmed"
             }
         ]
@@ -155,7 +160,7 @@ class Assertion(Model):
                 "attribute_type_id": "biolink:sequence_variant_qualifier",
                 "value": "SO:0002053",
                 "value_type_id": "biolink:SequenceVariant",
-                "description": "Indicates that the gene in this assertion is a gain-of-function variant",
+                # "description": "Indicates that the gene in this assertion is a gain-of-function variant",
                 "attribute_source": "infores:text-mining-provider-targeted"
             })
         if predicate == 'biolink:loss_of_function_contributes_to':
@@ -163,7 +168,7 @@ class Assertion(Model):
                 "attribute_type_id": "biolink:sequence_variant_qualifier",
                 "value": "SO:0002054",
                 "value_type_id": "biolink:SequenceVariant",
-                "description": "Indicates that the gene in this assertion is a loss-of-function variant",
+                # "description": "Indicates that the gene in this assertion is a loss-of-function variant",
                 "attribute_source": "infores:text-mining-provider-targeted"
             })
         for study in evidence_list:
@@ -216,10 +221,11 @@ class Evidence(Model):
     document_zone = Column(String(45))
     document_publication_type = Column(String(100))
     document_year_published = Column(Integer)
+    superseded_by = Column(String(20))
     evidence_scores = relationship('EvidenceScore', lazy='subquery')
 
     def __init__(self, evidence_id, assertion_id, document_id, sentence, subject_entity_id, object_entity_id,
-                 document_zone, document_publication_type, document_year_published):
+                 document_zone, document_publication_type, document_year_published, superseded_by):
         self.evidence_id = evidence_id
         self.assertion_id = assertion_id
         self.document_id = document_id
@@ -229,6 +235,7 @@ class Evidence(Model):
         self.document_zone = document_zone
         self.document_publication_type = document_publication_type
         self.document_year_published = document_year_published
+        self.superseded_by = superseded_by
 
     def get_top_predicate(self) -> str:
         self.evidence_scores.sort(key=lambda ev_score: ev_score.score, reverse=True)
@@ -247,14 +254,14 @@ class Evidence(Model):
             "attribute_type_id": "biolink:supporting_study_result",
             "value": f"tmkp:{self.evidence_id}",
             "value_type_id": "biolink:TextMiningResult",
-            "description": "a single result from running NLP tool over a piece of text",
+            # "description": "a single result from running NLP tool over a piece of text",
             "attribute_source": "infores:text-mining-provider-targeted",
             "attributes": [
                 {
                     "attribute_type_id": "biolink:supporting_text",
                     "value": self.sentence,
                     "value_type_id": "EDAM:data_3671",
-                    "description": "A sentence asserting the Biolink association represented by the parent edge",
+                    # "description": "A sentence asserting the Biolink association represented by the parent edge",
                     "attribute_source": "infores:text-mining-provider-targeted"
                 },
                 {
@@ -262,49 +269,49 @@ class Evidence(Model):
                     "value": self.document_id,
                     "value_type_id": "biolink:Publication",
                     "value_url": f"https://pubmed.ncbi.nlm.nih.gov/{str(self.document_id).split(':')[-1]}/",
-                    "description": "The document that contains the sentence that asserts the Biolink association represented by the parent edge",
+                    # "description": "The document that contains the sentence that asserts the Biolink association represented by the parent edge",
                     "attribute_source": "infores:pubmed"
                 },
-                {
-                    "attribute_type_id": "biolink:supporting_document_type",
-                    "value": self.document_publication_type,
-                    "value_type_id": "MESH:U000020",
-                    "description": "The publication type(s) for the document in which the sentence appears, as defined by PubMed; pipe-delimited",
-                    "attribute_source": "infores:pubmed"
-                },
-                {
-                    "attribute_type_id": "biolink:supporting_document_year",
-                    "value": self.document_year_published,
-                    "value_type_id": "UO:0000036",
-                    "description": "The year the document in which the sentence appears was published",
-                    "attribute_source": "infores:pubmed"
-                },
+                # {
+                #     "attribute_type_id": "biolink:supporting_document_type",
+                #     "value": self.document_publication_type,
+                #     "value_type_id": "MESH:U000020",
+                #     "description": "The publication type(s) for the document in which the sentence appears, as defined by PubMed; pipe-delimited",
+                #     "attribute_source": "infores:pubmed"
+                # },
+                # {
+                #     "attribute_type_id": "biolink:supporting_document_year",
+                #     "value": self.document_year_published,
+                #     "value_type_id": "UO:0000036",
+                #     "description": "The year the document in which the sentence appears was published",
+                #     "attribute_source": "infores:pubmed"
+                # },
                 {
                     "attribute_type_id": "biolink:supporting_text_located_in",
                     "value": self.document_zone,
                     "value_type_id": "IAO_0000314",
-                    "description": "The part of the document where the sentence is located, e.g. title, abstract, introduction, conclusion, etc.",
+                    # "description": "The part of the document where the sentence is located, e.g. title, abstract, introduction, conclusion, etc.",
                     "attribute_source": "infores:pubmed"
                 },
                 {
                     "attribute_type_id": "biolink:extraction_confidence_score",
                     "value": self.get_score(),
                     "value_type_id": "EDAM:data_1772",
-                    "description": "The score provided by the underlying algorithm that asserted this sentence to represent the assertion specified by the parent edge",
+                    # "description": "The score provided by the underlying algorithm that asserted this sentence to represent the assertion specified by the parent edge",
                     "attribute_source": "infores:text-mining-provider-targeted"
                 },
                 {
                     "attribute_type_id": "biolink:subject_location_in_text",
                     "value": self.subject_entity.span if self.subject_entity else '',
                     "value_type_id": "SIO:001056",
-                    "description": "The start and end character offsets relative to the sentence for the subject of the assertion represented by the parent edge; start and end offsets are pipe-delimited, discontinuous spans are delimited using commas",
+                    # "description": "The start and end character offsets relative to the sentence for the subject of the assertion represented by the parent edge; start and end offsets are pipe-delimited, discontinuous spans are delimited using commas",
                     "attribute_source": "infores:text-mining-provider-targeted"
                 },
                 {
                     "attribute_type_id": "biolink:object_location_in_text",
                     "value": self.object_entity.span if self.object_entity else '',
                     "value_type_id": "SIO:001056",
-                    "description": "The start and end character offsets relative to the sentence for the object of the assertion represented by the parent edge; start and end offsets are pipe-delimited, discontinuous spans are delimited using commas",
+                    # "description": "The start and end character offsets relative to the sentence for the object of the assertion represented by the parent edge; start and end offsets are pipe-delimited, discontinuous spans are delimited using commas",
                     "attribute_source": "infores:text-mining-provider-targeted "
                 }
             ]
@@ -404,6 +411,16 @@ class ConceptIDF(Model):
         self.concept_curie = concept_curie
         self.level = level
         self.idf = idf
+
+
+class PubmedToPMC(Model):
+    __tablename__ = 'pubmed_to_pmc'
+    pmid = Column(String(20), primary_key=True)
+    pmcid = Column(String(20), primary_key=True)
+
+    def __init__(self, pmid, pmcid):
+        self.pmid = pmid
+        self.pmcid = pmcid
 
 
 def init_db(instance: str, user: str, password: str, database: str) -> None: # pragma: no cover
