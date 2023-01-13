@@ -28,14 +28,12 @@ class Assertion(Model):
                                primaryjoin='and_(Assertion.subject_curie==ConceptIDF.concept_curie, ConceptIDF.level=="document")')
     object_idf = relationship('ConceptIDF', viewonly=True, foreign_keys=object_curie, lazy='subquery',
                               primaryjoin='and_(Assertion.object_curie==ConceptIDF.concept_curie, ConceptIDF.level=="document")')
-    # updated_date = Column(DateTime)  # This will probably change soon
 
     def __init__(self, assertion_id, subject_curie, object_curie, association):
         self.assertion_id = assertion_id
         self.subject_curie = subject_curie
         self.object_curie = object_curie
         self.association_curie = association
-        # self.updated_date = updated_date
 
     def get_predicate_scores(self) -> dict:
         predicate_scores_dict = {}
@@ -95,9 +93,6 @@ class Assertion(Model):
             relevant_evidence = relevant_evidence[:limit]
         supporting_study_results = '|'.join([f'tmkp:{ev.evidence_id}' for ev in relevant_evidence])
         supporting_publications = '|'.join([ev.document_id for ev in relevant_evidence])
-        # display_predicate = predicate
-        # if predicate == 'biolink:gain_of_function_contributes_to' or predicate == 'biolink:loss_of_function_contributes_to':
-        #     display_predicate = 'biolink:contributes_to'
         return [self.subject_curie, predicate, self.object_curie, self.assertion_id,
                 self.association_curie, self.get_aggregate_score(predicate), supporting_study_results, supporting_publications,
                 self.get_json_attributes(predicate, relevant_evidence, evidence_count)]
@@ -118,12 +113,8 @@ class Assertion(Model):
         evidence_count = len(relevant_evidence)
         if limit > 0:
             relevant_evidence = relevant_evidence[:limit]
-
         supporting_study_results = '|'.join([f'tmkp:{ev.evidence_id}' for ev in relevant_evidence])
         supporting_publications = '|'.join([ev.document_id for ev in relevant_evidence])
-        # display_predicate = predicate
-        # if predicate == 'biolink:gain_of_function_contributes_to' or predicate == 'biolink:loss_of_function_contributes_to':
-        #     display_predicate = 'biolink:contributes_to'
         return [subject_id, predicate, object_id, self.assertion_id, self.association_curie,
                 self.get_aggregate_score(predicate), supporting_study_results, supporting_publications,
                 self.get_json_attributes(predicate, relevant_evidence, evidence_count)]
@@ -171,24 +162,6 @@ class Assertion(Model):
                 "attribute_source": "infores:pubmed"
             }
         ]
-        # if predicate == 'biolink:gain_of_function_contributes_to':
-        #     attributes_list.append({
-        #         "attribute_type_id": "biolink:sequence_variant_qualifier",
-        #         "value": "SO:0002053",
-        #         "value_type_id": "biolink:SequenceVariant",
-        #         "attribute_source": "infores:text-mining-provider-targeted"
-        #     })
-        #     attributes_list.append({
-        #         "attribute_type_id"
-        #     })
-        # if predicate == 'biolink:loss_of_function_contributes_to':
-        #     attributes_list.append({
-        #         "attribute_type_id": "biolink:sequence_variant_qualifier",
-        #         "value": "SO:0002054",
-        #         "value_type_id": "biolink:SequenceVariant",
-        #         # "description": "Indicates that the gene in this assertion is a loss-of-function variant",
-        #         "attribute_source": "infores:text-mining-provider-targeted"
-        #     })
         if semmed_count > 0:
             attributes_list.append({
                 "attribute_type_id": "biolink:semmed_agreement_count",

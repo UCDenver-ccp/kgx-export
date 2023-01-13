@@ -2,8 +2,6 @@ import http.client
 import json
 import logging
 import os
-import csv
-import sqlalchemy
 from typing import Iterator
 
 from google.cloud import storage
@@ -37,13 +35,12 @@ def get_normalized_nodes_by_parts(curie_list: list[str], sublist_size: int = 100
     :param sublist_size: the maximum number of curies per HTTP call
     """
     nodes = {}
-    curies = []
     start = sublist_size
     end = len(curie_list)
     extra = end % sublist_size
     logging.debug(f'Splitting the {len(curie_list)} length list of curies by {sublist_size}')
     for cap in range(start, end, sublist_size):
-        curies = curie_list[cap - sublist_size : cap]
+        curies = curie_list[cap - sublist_size: cap]
         node_subset = get_normalized_nodes(curies)
         nodes.update(node_subset)
         logging.debug(f'up to {len(nodes.keys())} nodes')
@@ -72,7 +69,7 @@ def upload_to_gcp(bucket_name: str, source_file_name: str, destination_blob_name
         os.remove(source_file_name)
 
 
-def get_from_gcp(bucket_name: str, blob_name: str, destination_file_name: str) -> None: # pragma: no cover
+def get_from_gcp(bucket_name: str, blob_name: str, destination_file_name: str) -> None:  # pragma: no cover
     client = storage.Client()
     bucket = client.bucket(bucket_name)
     logging.info(f'Downloading {blob_name} to {destination_file_name}')
@@ -167,14 +164,13 @@ def is_normal(curie: str, normalized_nodes: dict[str, dict]) -> bool:
     :returns true if the curie exists and is useable, false otherwise
     """
     return curie in normalized_nodes \
-           and normalized_nodes[curie] is not None \
-           and 'id' in normalized_nodes[curie] \
-           and 'label' in normalized_nodes[curie]['id'] \
-           and (not curie.startswith('CHEBI')
-                or 'biolink:SmallMolecule' == normalized_nodes[curie]['type'][0] if 'type' in normalized_nodes[curie] else 'biolink:NamedThing')
+        and normalized_nodes[curie] is not None \
+        and 'id' in normalized_nodes[curie] \
+        and 'label' in normalized_nodes[curie]['id'] \
+        and (not curie.startswith('CHEBI') or 'biolink:SmallMolecule' == normalized_nodes[curie]['type'][0] if 'type' in normalized_nodes[curie] else 'biolink:NamedThing')
 
 
-def get_kgx_nodes(curies: list[str], normalized_nodes:dict[str, dict]) -> Iterator[list[str]]:
+def get_kgx_nodes(curies: list[str], normalized_nodes: dict[str, dict]) -> Iterator[list[str]]:
     """
     Get the KGX node representation of a curie
 

@@ -1,21 +1,22 @@
 import gzip
+import json
 import logging
 import math
 import os
-import json
 import shutil
-from typing import Iterator
+from typing import Union, Any
+
+import sqlalchemy
 
 import models
 import services
-import sqlalchemy
 
 ROW_BATCH_SIZE = 40000
 HUMAN_TAXON = 'NCBITaxon:9606'
 ORIGINAL_KNOWLEDGE_SOURCE = "infores:text-mining-provider-targeted"
 
 
-def get_node_data(session: sqlalchemy.orm.Session, use_uniprot: bool=False) -> (list[str], dict[str, dict]):
+def get_node_data(session: sqlalchemy.orm.Session, use_uniprot: bool = False) -> (list[str], dict[str, dict]):
     """
     Get the subject and object curies from assertions, uniquifies the list,
     and calls the SRI Node Normalizer service to get the dictionary.
@@ -62,7 +63,7 @@ def write_nodes(curies: list[str], normalize_dict: dict[str, dict], output_filen
     return metadata_dict
 
 
-def write_edges(session: sqlalchemy.orm.Session, normalize_dict: dict[str, dict], output_filename: str, use_uniprot: bool=False, limit: int=0) -> None:
+def write_edges(session: sqlalchemy.orm.Session, normalize_dict: dict[str, dict], output_filename: str, use_uniprot: bool = False, limit: int = 0) -> Union[dict[Any, Any], dict]:
     """
     Get the edge (or edges) associated with each assertion and output them to a gzipped TSV file according to KGX edge format.
 
@@ -105,13 +106,13 @@ def write_edges(session: sqlalchemy.orm.Session, normalize_dict: dict[str, dict]
     return metadata_dict
 
 
-def create_kge_tarball(dir: str, node_metadata: dict, edge_metadata: dict):
+def create_kge_tarball(directory: str, node_metadata: dict, edge_metadata: dict):
     logging.info("Starting KGE tarball creation")
-    if not os.path.isdir(dir):
-        os.mkdir(dir)
-    node_file = os.path.join(dir, "nodes.tsv")
-    edge_file = os.path.join(dir, "edges.tsv")
-    metadata_file = os.path.join(dir, "content_metadata.json")
+    if not os.path.isdir(directory):
+        os.mkdir(directory)
+    node_file = os.path.join(directory, "nodes.tsv")
+    edge_file = os.path.join(directory, "edges.tsv")
+    metadata_file = os.path.join(directory, "content_metadata.json")
 
     metadata_dict = {
         "nodes": node_metadata,
@@ -137,10 +138,10 @@ def create_kge_tarball(dir: str, node_metadata: dict, edge_metadata: dict):
         logging.info("Extraction complete")
 
     logging.info("Creating tarball")
-    shutil.make_archive('targeted_assertions', 'gztar', root_dir=dir)
+    shutil.make_archive('targeted_assertions', 'gztar', root_dir=directory)
 
 
-def export_kg(session: sqlalchemy.orm.Session, bucket: str, blob_prefix: str, use_uniprot: bool=False, edge_limit: int=0) -> None: # pragma: no cover
+def export_kg(session: sqlalchemy.orm.Session, bucket: str, blob_prefix: str, use_uniprot: bool = False, edge_limit: int = 0) -> None:  # pragma: no cover
     """
     Create and upload the node and edge KGX files for targeted assertions.
 
@@ -151,9 +152,9 @@ def export_kg(session: sqlalchemy.orm.Session, bucket: str, blob_prefix: str, us
     :param edge_limit: the maximum number of supporting study results per edge to include in the JSON blob (0 is no limit)
     """
     (node_curies, normal_dict) = get_node_data(session, use_uniprot=use_uniprot)
-    node_metadata = write_nodes(node_curies, normal_dict, "nodes.tsv.gz")
-    services.upload_to_gcp(bucket, 'nodes.tsv.gz', f"{blob_prefix}nodes.tsv.gz")
+    node_metadata = write_nodes(node_curies, normal_dict, 'nodes.tsv.gz')
+    services.upload_to_gcp(bucket, 'nodes.tsv.gz', f'{blob_prefix}nodes.tsv.gz')
     edge_metadata = write_edges(session, normal_dict, "edges.tsv.gz", use_uniprot=use_uniprot, limit=edge_limit)
-    services.upload_to_gcp(bucket, 'edges.tsv.gz', f"{blob_prefix}edges.tsv.gz")
+    services.upload_to_gcp(bucket, 'edges.tsv.gz', f'{blob_prefix}edges.tsv.gz')
     create_kge_tarball('tmp', node_metadata, edge_metadata)
-    services.upload_to_gcp(bucket, 'targeted_assertions.tar.gz', f"{blob_prefix}targeted_assertions.tar.gz")
+    services.upload_to_gcp(bucket, 'targeted_assertions.tar.gz', f'{blob_prefix}targeted_assertions.tar.gz')
