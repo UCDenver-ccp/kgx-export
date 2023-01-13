@@ -1,8 +1,9 @@
 import json
+import math
 from math import fsum
 
 import pymysql.connections
-from google.cloud.sql.connector import connector
+from google.cloud.sql.connector import Connector
 from sqlalchemy import Column, String, Integer, Boolean, Float, ForeignKey, UniqueConstraint, create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
@@ -23,12 +24,18 @@ class Assertion(Model):
                                  primaryjoin='and_(Assertion.assertion_id==Evidence.assertion_id, Evidence.superseded_by.is_(None))')
     subject_uniprot = relationship('PRtoUniProt', foreign_keys=subject_curie, lazy='joined')
     object_uniprot = relationship('PRtoUniProt', foreign_keys=object_curie, lazy='joined')
+    subject_idf = relationship('ConceptIDF', viewonly=True, foreign_keys=subject_curie, lazy='subquery',
+                               primaryjoin='and_(Assertion.subject_curie==ConceptIDF.concept_curie, ConceptIDF.level=="document")')
+    object_idf = relationship('ConceptIDF', viewonly=True, foreign_keys=object_curie, lazy='subquery',
+                              primaryjoin='and_(Assertion.object_curie==ConceptIDF.concept_curie, ConceptIDF.level=="document")')
+    # updated_date = Column(DateTime)  # This will probably change soon
 
     def __init__(self, assertion_id, subject_curie, object_curie, association):
         self.assertion_id = assertion_id
         self.subject_curie = subject_curie
         self.object_curie = object_curie
         self.association_curie = association
+        # self.updated_date = updated_date
 
     def get_predicate_scores(self) -> dict:
         predicate_scores_dict = {}
@@ -40,7 +47,9 @@ class Assertion(Model):
         return set(evidence.get_top_predicate() for evidence in self.evidence_list)
 
     def get_aggregate_score(self, predicate) -> float:
-        relevant_scores = [evidence.get_score() for evidence in self.evidence_list if evidence.get_top_predicate() == predicate]
+        relevant_scores = [evidence.get_score(self.subject_idf.idf if self.subject_idf else None,
+                                              self.object_idf.idf if self.object_idf else None) for evidence in
+                           self.evidence_list if evidence.get_top_predicate() == predicate]
         return fsum(relevant_scores) / float(len(relevant_scores))
 
     def get_node_kgx(self, normalized_nodes) -> list:
@@ -86,10 +95,10 @@ class Assertion(Model):
             relevant_evidence = relevant_evidence[:limit]
         supporting_study_results = '|'.join([f'tmkp:{ev.evidence_id}' for ev in relevant_evidence])
         supporting_publications = '|'.join([ev.document_id for ev in relevant_evidence])
-        display_predicate = predicate
-        if predicate == 'biolink:gain_of_function_contributes_to' or predicate == 'biolink:loss_of_function_contributes_to':
-            display_predicate = 'biolink:contributes_to'
-        return [self.subject_curie, display_predicate, self.object_curie, self.assertion_id,
+        # display_predicate = predicate
+        # if predicate == 'biolink:gain_of_function_contributes_to' or predicate == 'biolink:loss_of_function_contributes_to':
+        #     display_predicate = 'biolink:contributes_to'
+        return [self.subject_curie, predicate, self.object_curie, self.assertion_id,
                 self.association_curie, self.get_aggregate_score(predicate), supporting_study_results, supporting_publications,
                 self.get_json_attributes(predicate, relevant_evidence, evidence_count)]
 
@@ -104,21 +113,28 @@ class Assertion(Model):
         subject_id = self.subject_uniprot.uniprot if self.subject_uniprot else self.subject_curie
         object_id = self.object_uniprot.uniprot if self.object_uniprot else self.object_curie
         relevant_evidence = [ev for ev in self.evidence_list if ev.get_top_predicate() == predicate]
+        relevant_evidence.sort(key=lambda ev: 1 if ev.semmed_lookup else 0, reverse=True)
+        relevant_evidence.sort(key=lambda ev: ev.get_score(self.subject_idf.idf if self.subject_idf else None, self.object_idf.idf if self.object_idf else None, predicate), reverse=True)
         evidence_count = len(relevant_evidence)
         if limit > 0:
             relevant_evidence = relevant_evidence[:limit]
+
         supporting_study_results = '|'.join([f'tmkp:{ev.evidence_id}' for ev in relevant_evidence])
         supporting_publications = '|'.join([ev.document_id for ev in relevant_evidence])
-        display_predicate = predicate
-        if predicate == 'biolink:gain_of_function_contributes_to' or predicate == 'biolink:loss_of_function_contributes_to':
-            display_predicate = 'biolink:contributes_to'
-        return [subject_id, display_predicate, object_id, self.assertion_id, self.association_curie,
+        # display_predicate = predicate
+        # if predicate == 'biolink:gain_of_function_contributes_to' or predicate == 'biolink:loss_of_function_contributes_to':
+        #     display_predicate = 'biolink:contributes_to'
+        return [subject_id, predicate, object_id, self.assertion_id, self.association_curie,
                 self.get_aggregate_score(predicate), supporting_study_results, supporting_publications,
                 self.get_json_attributes(predicate, relevant_evidence, evidence_count)]
 
     def get_json_attributes(self, predicate, evidence_list, evidence_count=0) -> json:
         if evidence_count == 0:
             evidence_count = len(evidence_list)
+        semmed_count = 0
+        for evidence in evidence_list:
+            if evidence.semmed_lookup:
+                semmed_count += 1
         attributes_list = [
             {
                 "attribute_type_id": "biolink:original_knowledge_source",
@@ -155,24 +171,34 @@ class Assertion(Model):
                 "attribute_source": "infores:pubmed"
             }
         ]
-        if predicate == 'biolink:gain_of_function_contributes_to':
+        # if predicate == 'biolink:gain_of_function_contributes_to':
+        #     attributes_list.append({
+        #         "attribute_type_id": "biolink:sequence_variant_qualifier",
+        #         "value": "SO:0002053",
+        #         "value_type_id": "biolink:SequenceVariant",
+        #         "attribute_source": "infores:text-mining-provider-targeted"
+        #     })
+        #     attributes_list.append({
+        #         "attribute_type_id"
+        #     })
+        # if predicate == 'biolink:loss_of_function_contributes_to':
+        #     attributes_list.append({
+        #         "attribute_type_id": "biolink:sequence_variant_qualifier",
+        #         "value": "SO:0002054",
+        #         "value_type_id": "biolink:SequenceVariant",
+        #         # "description": "Indicates that the gene in this assertion is a loss-of-function variant",
+        #         "attribute_source": "infores:text-mining-provider-targeted"
+        #     })
+        if semmed_count > 0:
             attributes_list.append({
-                "attribute_type_id": "biolink:sequence_variant_qualifier",
-                "value": "SO:0002053",
-                "value_type_id": "biolink:SequenceVariant",
-                # "description": "Indicates that the gene in this assertion is a gain-of-function variant",
-                "attribute_source": "infores:text-mining-provider-targeted"
-            })
-        if predicate == 'biolink:loss_of_function_contributes_to':
-            attributes_list.append({
-                "attribute_type_id": "biolink:sequence_variant_qualifier",
-                "value": "SO:0002054",
-                "value_type_id": "biolink:SequenceVariant",
-                # "description": "Indicates that the gene in this assertion is a loss-of-function variant",
+                "attribute_type_id": "biolink:semmed_agreement_count",
+                "value": semmed_count,
+                "value_type_id": "SIO:000794",
                 "attribute_source": "infores:text-mining-provider-targeted"
             })
         for study in evidence_list:
-            attributes_list.append(study.get_json_attributes())
+            attributes_list.append(study.get_json_attributes(self.subject_idf.idf if self.subject_idf else None,
+                                                             self.object_idf.idf if self.object_idf else None))
         return json.dumps(attributes_list)
 
 
@@ -209,11 +235,13 @@ class Evaluation(Model):
 
 class Evidence(Model):
     __tablename__ = 'evidence'
-    evidence_id = Column(String(65), primary_key=True)
+    evidence_id = Column(String(65), ForeignKey('tm_semmed.tm_id'), primary_key=True)
     assertion_id = Column(String(65), ForeignKey('assertion.assertion_id'))
     assertion = relationship('Assertion', back_populates='evidence_list')
-    document_id = Column(String(45))
+    document_id = Column(String(45), ForeignKey('document_year.document_id'))
+    # document_id = Column(String(45), ForeignKey('document_year.document_id'), ForeignKey('semmed.pmid'))
     sentence = Column(String(2000))
+    # sentence = Column(String(2000), ForeignKey('semmed.sentence'))
     subject_entity_id = Column(String(65), ForeignKey('entity.entity_id'))
     subject_entity = relationship('Entity', foreign_keys=subject_entity_id, lazy='joined')
     object_entity_id = Column(String(65), ForeignKey('entity.entity_id'))
@@ -221,8 +249,10 @@ class Evidence(Model):
     document_zone = Column(String(45))
     document_publication_type = Column(String(100))
     document_year_published = Column(Integer)
+    actual_year = relationship('DocumentYear', foreign_keys=document_id, lazy='joined')
     superseded_by = Column(String(20))
     evidence_scores = relationship('EvidenceScore', lazy='subquery')
+    semmed_lookup = relationship('TmSemmed', viewonly=True, uselist=True, foreign_keys=evidence_id, lazy='joined')
 
     def __init__(self, evidence_id, assertion_id, document_id, sentence, subject_entity_id, object_entity_id,
                  document_zone, document_publication_type, document_year_published, superseded_by):
@@ -244,77 +274,88 @@ class Evidence(Model):
     def get_predicates(self) -> set:
         return set(es.predicate_curie for es in self.evidence_scores)
 
-    def get_score(self, predicate=None) -> float:
+    def get_score(self, subject_idf=None, object_idf=None, predicate=None) -> float:
         if predicate is None:
             predicate = self.get_top_predicate()
-        return next((x.score for x in self.evidence_scores if x.predicate_curie == predicate), None)
+        base_score = next((x.score for x in self.evidence_scores if x.predicate_curie == predicate), None)
+        if not base_score:
+            return 0.0
+        if base_score and (not subject_idf or not object_idf):
+            return base_score
+        return abs(math.log10(subject_idf) * math.log10(object_idf) * base_score)
 
-    def get_json_attributes(self):
+    def get_json_attributes(self, subject_idf=None, object_idf=None):
+        nested_attributes = [
+            {
+                "attribute_type_id": "biolink:supporting_text",
+                "value": self.sentence,
+                "value_type_id": "EDAM:data_3671",
+                # "description": "A sentence asserting the Biolink association represented by the parent edge",
+                "attribute_source": "infores:text-mining-provider-targeted"
+            },
+            {
+                "attribute_type_id": "biolink:supporting_document",
+                "value": self.document_id,
+                "value_type_id": "biolink:Publication",
+                "value_url": f"https://pubmed.ncbi.nlm.nih.gov/{str(self.document_id).split(':')[-1]}/",
+                # "description": "The document that contains the sentence that asserts the Biolink association represented by the parent edge",
+                "attribute_source": "infores:pubmed"
+            },
+            {
+                "attribute_type_id": "biolink:supporting_text_located_in",
+                "value": self.document_zone,
+                "value_type_id": "IAO_0000314",
+                # "description": "The part of the document where the sentence is located, e.g. title, abstract, introduction, conclusion, etc.",
+                "attribute_source": "infores:pubmed"
+            },
+            {
+                "attribute_type_id": "biolink:extraction_confidence_score",
+                "value": self.get_score(subject_idf, object_idf),
+                "value_type_id": "EDAM:data_1772",
+                # "description": "The score provided by the underlying algorithm that asserted this sentence to represent the assertion specified by the parent edge",
+                "attribute_source": "infores:text-mining-provider-targeted"
+            },
+            {
+                "attribute_type_id": "biolink:subject_location_in_text",
+                "value": self.subject_entity.span if self.subject_entity else '',
+                "value_type_id": "SIO:001056",
+                # "description": "The start and end character offsets relative to the sentence for the subject of the assertion represented by the parent edge; start and end offsets are pipe-delimited, discontinuous spans are delimited using commas",
+                "attribute_source": "infores:text-mining-provider-targeted"
+            },
+            {
+                "attribute_type_id": "biolink:object_location_in_text",
+                "value": self.object_entity.span if self.object_entity else '',
+                "value_type_id": "SIO:001056",
+                # "description": "The start and end character offsets relative to the sentence for the object of the assertion represented by the parent edge; start and end offsets are pipe-delimited, discontinuous spans are delimited using commas",
+                "attribute_source": "infores:text-mining-provider-targeted "
+            }
+        ]
+        if self.actual_year:
+            nested_attributes.append(
+                {
+                    "attribute_type_id": "biolink:supporting_document_year",
+                    "value": self.actual_year.year,
+                    "value_type_id": "UO:0000036",
+                    # "description": "The year the document in which the sentence appears was published",
+                    "attribute_source": "infores:pubmed"
+                }
+            )
+        if self.semmed_lookup:
+            nested_attributes.append(
+                {
+                    "attribute_type_id": "biolink:agrees_with_data_source",
+                    "value": "infores:semmeddb",
+                    "value_type_id": "biolink:InformationResource",
+                    "attribute_source": "infores:text-mining-provider-targeted"
+                }
+            )
         return {
             "attribute_type_id": "biolink:supporting_study_result",
             "value": f"tmkp:{self.evidence_id}",
             "value_type_id": "biolink:TextMiningResult",
             # "description": "a single result from running NLP tool over a piece of text",
             "attribute_source": "infores:text-mining-provider-targeted",
-            "attributes": [
-                {
-                    "attribute_type_id": "biolink:supporting_text",
-                    "value": self.sentence,
-                    "value_type_id": "EDAM:data_3671",
-                    # "description": "A sentence asserting the Biolink association represented by the parent edge",
-                    "attribute_source": "infores:text-mining-provider-targeted"
-                },
-                {
-                    "attribute_type_id": "biolink:supporting_document",
-                    "value": self.document_id,
-                    "value_type_id": "biolink:Publication",
-                    "value_url": f"https://pubmed.ncbi.nlm.nih.gov/{str(self.document_id).split(':')[-1]}/",
-                    # "description": "The document that contains the sentence that asserts the Biolink association represented by the parent edge",
-                    "attribute_source": "infores:pubmed"
-                },
-                # {
-                #     "attribute_type_id": "biolink:supporting_document_type",
-                #     "value": self.document_publication_type,
-                #     "value_type_id": "MESH:U000020",
-                #     "description": "The publication type(s) for the document in which the sentence appears, as defined by PubMed; pipe-delimited",
-                #     "attribute_source": "infores:pubmed"
-                # },
-                # {
-                #     "attribute_type_id": "biolink:supporting_document_year",
-                #     "value": self.document_year_published,
-                #     "value_type_id": "UO:0000036",
-                #     "description": "The year the document in which the sentence appears was published",
-                #     "attribute_source": "infores:pubmed"
-                # },
-                {
-                    "attribute_type_id": "biolink:supporting_text_located_in",
-                    "value": self.document_zone,
-                    "value_type_id": "IAO_0000314",
-                    # "description": "The part of the document where the sentence is located, e.g. title, abstract, introduction, conclusion, etc.",
-                    "attribute_source": "infores:pubmed"
-                },
-                {
-                    "attribute_type_id": "biolink:extraction_confidence_score",
-                    "value": self.get_score(),
-                    "value_type_id": "EDAM:data_1772",
-                    # "description": "The score provided by the underlying algorithm that asserted this sentence to represent the assertion specified by the parent edge",
-                    "attribute_source": "infores:text-mining-provider-targeted"
-                },
-                {
-                    "attribute_type_id": "biolink:subject_location_in_text",
-                    "value": self.subject_entity.span if self.subject_entity else '',
-                    "value_type_id": "SIO:001056",
-                    # "description": "The start and end character offsets relative to the sentence for the subject of the assertion represented by the parent edge; start and end offsets are pipe-delimited, discontinuous spans are delimited using commas",
-                    "attribute_source": "infores:text-mining-provider-targeted"
-                },
-                {
-                    "attribute_type_id": "biolink:object_location_in_text",
-                    "value": self.object_entity.span if self.object_entity else '',
-                    "value_type_id": "SIO:001056",
-                    # "description": "The start and end character offsets relative to the sentence for the object of the assertion represented by the parent edge; start and end offsets are pipe-delimited, discontinuous spans are delimited using commas",
-                    "attribute_source": "infores:text-mining-provider-targeted "
-                }
-            ]
+            "attributes": nested_attributes
         }
 
 
@@ -423,7 +464,78 @@ class PubmedToPMC(Model):
         self.pmcid = pmcid
 
 
-def init_db(instance: str, user: str, password: str, database: str) -> None: # pragma: no cover
+class DocumentYear(Model):
+    __tablename__ = 'document_year'
+    document_id = Column(String(45), ForeignKey('evidence.document_id'), primary_key=True)
+    year = Column(Integer)
+
+    def __init__(self, document_id, year):
+        self.document_id = document_id
+        self.year = year
+
+
+# class Semmed(Model):
+#     __tablename__ = 'semmed'
+#     sid = Column('id', Integer, ForeignKey('tm_semmed.semmed_id'), primary_key=True)
+#     pmid = Column(String(45))
+#     sen_start_index = Column(Integer)
+#     sentence = Column(String(2000))
+#     sen_end_index = Column(Integer)
+#     predicate = Column(String(45))
+#     subject_cui = Column(String(45), ForeignKey('umls_to_obo.umls'))
+#     subject_name = Column(String(250))
+#     subject_curie = relationship('UmlsToObo', foreign_keys=subject_cui, lazy='joined')
+#     object_cui = Column(String(45), ForeignKey('umls_to_obo.umls'))
+#     object_name = Column(String(250))
+#     object_curie = relationship('UmlsToObo', foreign_keys=object_cui, lazy='joined')
+#     subject_start_index = Column(Integer)
+#     subject_end_index = Column(Integer)
+#     predicate_start_index = Column(Integer)
+#     predicate_end_index = Column(Integer)
+#
+#     def __init__(self, pmid, sen_start_index, sentence, sen_end_index, predicate,
+#                  subject_cui, subject_name, object_cui, object_name,
+#                  subject_start_index, subject_end_index, predicate_start_index, predicate_end_index):
+#         self.pmid = pmid
+#         self.sen_start_index = sen_start_index
+#         self.sentence = sentence
+#         self.sen_end_index = sen_end_index
+#         self.predicate = predicate
+#         self.subject_cui = subject_cui
+#         self.subject_name = subject_name
+#         self.object_cui = object_cui
+#         self.object_name = object_name
+#         self.subject_start_index = subject_start_index
+#         self.subject_end_index = subject_end_index
+#         self.predicate_start_index = predicate_start_index
+#         self.predicate_end_index = predicate_end_index
+#
+#
+# class UmlsToObo(Model):
+#     __tablename__ = 'umls_to_obo'
+#     umls = Column(String(20), ForeignKey('semmed.subject_cui'), ForeignKey('semmed.object_cui'), primary_key=True)
+#     obo = Column(String(20), primary_key=True)
+#
+#     def __init__(self, umls, obo):
+#         self.umls = umls
+#         self.obo = obo
+
+
+class TmSemmed(Model):
+    __tablename__ = 'tm_semmed'
+    tm_id = Column(String(65), ForeignKey(Evidence.evidence_id), primary_key=True)
+    # semmed_id = Column(Integer, ForeignKey(Semmed.sid), primary_key=True)
+    semmed_id = Column(Integer, primary_key=True)
+    # semmed = relationship('Semmed', foreign_keys=semmed_id, lazy='joined')
+
+    def __init__(self, tm_id, semmed_id):
+        self.tm_id = tm_id
+        self.semmed_id = semmed_id
+
+
+def init_db(instance: str, user: str, password: str, database: str) -> None:  # pragma: no cover
+    connector = Connector()
+
     def get_conn() -> pymysql.connections.Connection:
         conn: pymysql.connections.Connection = connector.connect(
             instance_connection_string=instance,
@@ -433,6 +545,7 @@ def init_db(instance: str, user: str, password: str, database: str) -> None: # p
             database=database
         )
         return conn
+
     engine = create_engine('mysql+pymysql://', creator=get_conn, echo=False)
     global session
     session = sessionmaker()

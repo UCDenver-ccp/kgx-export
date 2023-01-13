@@ -9,7 +9,7 @@ from typing import Iterator
 from google.cloud import storage
 
 
-def get_normalized_nodes(curie_list: list[str]) -> dict: # pragma: no cover
+def get_normalized_nodes(curie_list: list[str]) -> dict:  # pragma: no cover
     """
     Use the SRI Node Normalization service to get detailed node information from curies
 
@@ -19,7 +19,7 @@ def get_normalized_nodes(curie_list: list[str]) -> dict: # pragma: no cover
     headers = {"Content-type": "application/json", "Accept": "application/json"}
     conn = http.client.HTTPSConnection(host='nodenormalization-sri.renci.org')
     try:
-        conn.request('POST', '/1.2/get_normalized_nodes', body=json_data, headers=headers)
+        conn.request('POST', '/get_normalized_nodes', body=json_data, headers=headers)
         response = conn.getresponse()
         if response.status == 200:
             return json.loads(response.read())
@@ -29,7 +29,7 @@ def get_normalized_nodes(curie_list: list[str]) -> dict: # pragma: no cover
     return {}
 
 
-def get_normalized_nodes_by_parts(curie_list: list[str], sublist_size: int=1000) -> dict: # pragma: no cover
+def get_normalized_nodes_by_parts(curie_list: list[str], sublist_size: int = 1000) -> dict:  # pragma: no cover
     """
     Use the SRI Node Normalization service to get detailed node information from curies, with a maxiumum number of curies per HTTP call
 
@@ -54,7 +54,7 @@ def get_normalized_nodes_by_parts(curie_list: list[str], sublist_size: int=1000)
     return nodes
 
 
-def upload_to_gcp(bucket_name: str, source_file_name: str, destination_blob_name: str, delete_source_file: bool=False) -> None: # pragma: no cover
+def upload_to_gcp(bucket_name: str, source_file_name: str, destination_blob_name: str, delete_source_file: bool = False) -> None:  # pragma: no cover
     """
     Upload a file to the specified GCP Bucket with the given blob name.
 
@@ -166,10 +166,12 @@ def is_normal(curie: str, normalized_nodes: dict[str, dict]) -> bool:
     :param normalized_nodes: the normalization dictionary
     :returns true if the curie exists and is useable, false otherwise
     """
-    return curie in normalized_nodes and normalized_nodes[curie] is not None and \
-           'id' in normalized_nodes[curie] and 'label' in normalized_nodes[curie]['id'] and \
-           (not curie.startswith('CHEBI') or \
-           'biolink:SmallMolecule' == normalized_nodes[curie]['type'][0] if 'type' in normalized_nodes[curie] else 'biolink:NamedThing')
+    return curie in normalized_nodes \
+           and normalized_nodes[curie] is not None \
+           and 'id' in normalized_nodes[curie] \
+           and 'label' in normalized_nodes[curie]['id'] \
+           and (not curie.startswith('CHEBI')
+                or 'biolink:SmallMolecule' == normalized_nodes[curie]['type'][0] if 'type' in normalized_nodes[curie] else 'biolink:NamedThing')
 
 
 def get_kgx_nodes(curies: list[str], normalized_nodes:dict[str, dict]) -> Iterator[list[str]]:
