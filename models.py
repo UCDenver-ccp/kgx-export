@@ -358,63 +358,6 @@ class PRtoUniProt(Model):
         self.taxon = taxon
 
 
-class Cooccurrence(Model):
-    __tablename__ = 'cooccurrence'
-    cooccurrence_id = Column(String(27), primary_key=True)
-    entity1_curie = Column(String(100))
-    entity1_uniprot = relationship('PRtoUniProt', viewonly=True, uselist=False, primaryjoin='Cooccurrence.entity1_curie == PRtoUniProt.pr', lazy='joined')
-    entity2_curie = Column(String(45))
-    entity2_uniprot = relationship('PRtoUniProt', viewonly=True, uselist=False, primaryjoin='Cooccurrence.entity2_curie == PRtoUniProt.pr', lazy='joined')
-    scores_list = relationship('CooccurrenceScores', primaryjoin='Cooccurrence.cooccurrence_id == CooccurrenceScores.cooccurrence_id', lazy='subquery')
-
-    def __init__(self, cooccurrence_id, entity1_curie, entity2_curie):
-        self.cooccurrence_id = cooccurrence_id
-        self.entity1_curie = entity1_curie
-        self.entity2_curie = entity2_curie
-
-
-class CooccurrenceScores(Model):
-    __tablename__ = 'cooccurrence_scores'
-    cooccurrence_id = Column(String(27), ForeignKey('cooccurrence.cooccurrence_id'), ForeignKey('cooccurrence_publication.cooccurrence_id'), primary_key=True)
-    level = Column(String(45), ForeignKey('cooccurrence_publication.level'), primary_key=True)
-    publication_list = relationship('CooccurrencePublication', viewonly=True, uselist=True,
-                                    primaryjoin='and_(CooccurrenceScores.cooccurrence_id == CooccurrencePublication.cooccurrence_id, CooccurrenceScores.level == CooccurrencePublication.level)', lazy='joined')
-    concept1_count = Column(Integer)
-    concept2_count = Column(Integer)
-    pair_count = Column(Integer)
-    ngd = Column(Float)
-    pmi = Column(Float)
-    pmi_norm = Column(Float)
-    pmi_norm_max = Column(Float)
-    mutual_dependence = Column(Float)
-    lfmd = Column(Float)
-
-    def __init__(self, cooccurrence_id, level, concept1_count, concept2_count, pair_count, ngd, pmi, pmi_norm, pmi_norm_max, mutual_dependence, lfmd):
-        self.cooccurrence_id = cooccurrence_id
-        self.level = level
-        self.concept1_count = concept1_count
-        self.concept2_count = concept2_count
-        self.pair_count = pair_count
-        self.ngd = ngd
-        self.pmi = pmi
-        self.pmi_norm = pmi_norm
-        self.pmi_norm_max = pmi_norm_max
-        self.mutual_dependence = mutual_dependence
-        self.lfmd = lfmd
-
-
-class CooccurrencePublication(Model):
-    __tablename__ = 'cooccurrence_publication'
-    cooccurrence_id = Column(String(27), ForeignKey('cooccurrence_scores.cooccurrence_id'), primary_key=True)
-    level = Column(String(45), ForeignKey('cooccurrence_scores.level'), primary_key=True)
-    document_id = Column(String(45), primary_key=True)
-
-    def __init__(self, cooccurrence_id, level, document_id):
-        self.cooccurrence_id = cooccurrence_id
-        self.level = level
-        self.document_id = document_id
-
-
 class ConceptIDF(Model):
     __tablename__ = 'concept_idf'
     concept_curie = Column(String(100), primary_key=True)
