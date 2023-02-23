@@ -141,6 +141,43 @@ def update_edge_metadata(edge: list, edge_metadata_dict: dict, node_dict: dict, 
     return edge_metadata_dict
 
 
+def update_edge_metadata_2(edge, edge_metadata_dict: dict, node_dict: dict, source: str) -> dict:
+    """
+    Updates an edge metadata dictionary with information from a single edge
+
+    :param edge: the edge to add to the dictionary
+    :param edge_metadata_dict: the metadata dictionary
+    :param node_dict: the normalization dictionary
+    :param source: the original knowledge source
+    :returns the updated edge metadata dictionary
+    """
+    sub = edge['subject_uniprot'] if edge['subject_uniprot'] else edge['subject_curie']
+    obj = edge['object_uniprot'] if edge['object_uniprot'] else edge['object_curie']
+    object_category = get_category(obj, normalized_nodes=node_dict)
+    subject_category = get_category(sub, normalized_nodes=node_dict)
+    triple = f"{object_category}|{edge['predicate_curie']}|{subject_category}"
+    relation = edge['association_curie']
+    if triple in edge_metadata_dict:
+        if relation not in edge_metadata_dict[triple]["relations"]:
+            edge_metadata_dict[triple]["relations"].append(relation)
+        edge_metadata_dict[triple]["count"] += 1
+        edge_metadata_dict[triple]["count_by_source"]["original_knowledge_source"][source] += 1
+    else:
+        edge_metadata_dict[triple] = {
+            "subject": subject_category,
+            "predicate": edge['predicate_curie'],
+            "object": object_category,
+            "relations": [relation],
+            "count": 1,
+            "count_by_source": {
+                "original_knowledge_source": {
+                    source: 1
+                }
+            }
+        }
+    return edge_metadata_dict
+
+
 def get_category(curie: str, normalized_nodes: dict[str, dict]) -> str:
     """
     Retrieves the category of the given curie, as determined by the normalized dictionary (with some default values)

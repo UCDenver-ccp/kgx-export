@@ -16,6 +16,7 @@ if __name__ == "__main__":
     parser.add_argument('-p', '--password', help='database password')
     parser.add_argument('-pr', '--pr_bucket', help='storage bucket for PR data')
     parser.add_argument('-uni', '--uniprot_bucket', help='storage bucket for UniProt data')
+    parser.add_argument('-c', '--chunk_size', help='number of assertions to process at a time', default=100, type=int)
     parser.add_argument('-l', '--limit', help='maximum number of publications to export per edge', default=0, type=int)
     parser.add_argument('-v', '--verbose', action='store_true')
     parser.add_argument('-e', '--kge_only', action='store_true')
@@ -26,7 +27,7 @@ if __name__ == "__main__":
     ontology = args.ontology.lower() if args.ontology else 'both'
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
-    # os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'prod-creds.json'
+    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'prod-creds.json'
     models.init_db(
         instance=args.instance if args.instance else os.getenv('MYSQL_DATABASE_INSTANCE', None),
         user=args.user if args.user else os.getenv('MYSQL_DATABASE_USER', None),
@@ -38,8 +39,5 @@ if __name__ == "__main__":
     logging.info("Exporting Targeted Assertion knowledge graph")
     if ontology == 'uniprot' or ontology == 'both':
         logging.info("Exporting UniProt")
-        targeted.export_kg(session, uniprot_bucket, 'kgx/UniProt/', use_uniprot=True, edge_limit=args.limit)
-    if ontology == 'pr' or ontology == 'both':
-        logging.info("Exporting PR")
-        targeted.export_kg(session, pr_bucket, 'kgx/PR/', use_uniprot=False, edge_limit=args.limit)
+        targeted.export_kg(session, uniprot_bucket, 'kgx/UniProt/', use_uniprot=True, chunk_size=args.chunk_size, edge_limit=args.limit)
     logging.info("End Main")
