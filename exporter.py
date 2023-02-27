@@ -18,6 +18,9 @@ if __name__ == "__main__":
     parser.add_argument('-uni', '--uniprot_bucket', help='storage bucket for UniProt data')
     parser.add_argument('-c', '--chunk_size', help='number of assertions to process at a time', default=100, type=int)
     parser.add_argument('-l', '--limit', help='maximum number of publications to export per edge', default=0, type=int)
+    parser.add_argument('-ao', '--assertion_offset', help='number of assertions to skip past', default=0, type=int)
+    parser.add_argument('-al', '--assertion_limit', help='number of assertions to output', default=10000, type=int)
+    parser.add_argument('-n', '--nodes_only', action='store_true')
     parser.add_argument('-v', '--verbose', action='store_true')
     parser.add_argument('-e', '--kge_only', action='store_true')
     args = parser.parse_args()
@@ -39,5 +42,10 @@ if __name__ == "__main__":
     logging.info("Exporting Targeted Assertion knowledge graph")
     if ontology == 'uniprot' or ontology == 'both':
         logging.info("Exporting UniProt")
-        targeted.export_kg(session, uniprot_bucket, 'kgx/UniProt/', use_uniprot=True, chunk_size=args.chunk_size, edge_limit=args.limit)
+        if args.nodes_only:
+            targeted.export_nodes(session, uniprot_bucket, 'kgx/UniProt/')
+        else:
+            targeted.export_kg(session, uniprot_bucket, 'kgx/UniProt/',
+                               assertion_start=args.assertion_offset, assertion_limit=args.assertion_limit,
+                               use_uniprot=True, chunk_size=args.chunk_size, edge_limit=args.limit)
     logging.info("End Main")

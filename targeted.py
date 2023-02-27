@@ -74,19 +74,26 @@ def write_nodes(curies: list[str], normalize_dict: dict[str, dict], output_filen
     return metadata_dict
 
 
-def get_assertion_ids(session):
+def get_assertion_ids(session, limit=600000, offset=0):
     id_query = text('SELECT assertion_id FROM assertion WHERE assertion_id NOT IN '
                     '(SELECT DISTINCT(assertion_id) '
                     'FROM evaluation INNER JOIN evidence '
                     'ON evidence.evidence_id = evaluation.evidence_id '
                     'WHERE overall_correct = 0 OR subject_correct = 0 '
                     'OR object_correct = 0 OR predicate_correct = 0) '
-                    'AND subject_curie NOT IN :ex1 AND object_curie NOT IN :ex2'
+                    'AND subject_curie NOT IN :ex1 AND object_curie NOT IN :ex2 '
+                    'ORDER BY assertion_id '
+                    'LIMIT :limit OFFSET :offset'
                     )
-    return [row[0] for row in session.execute(id_query, {'ex1': EXCLUDED_FIG_CURIES, 'ex2': EXCLUDED_FIG_CURIES})]
+    return [row[0] for row in session.execute(id_query, {
+        'ex1': EXCLUDED_FIG_CURIES,
+        'ex2': EXCLUDED_FIG_CURIES,
+        'limit': limit,
+        'offset': offset
+    })]
 
 
-def get_edge_data(session: Session, id_list, chunk_size=100, edge_limit=5) -> list[str]:
+def get_edge_data(session: Session, id_list, chunk_size=1000, edge_limit=5) -> list[str]:
     logging.info(f'\nStarting edge data gathering\nChunk Size: {chunk_size}\nEdge Limit: {edge_limit}\n')
     logging.info(f'Total Assertions: {len(id_list)}.')
     logging.info(f'Partition count: {math.ceil(len(id_list) / chunk_size)}')
@@ -450,7 +457,14 @@ def create_kge_tarball(directory: str, node_metadata: dict, edge_metadata: dict)
     shutil.make_archive('targeted_assertions', 'gztar', root_dir=directory)
 
 
+def export_nodes(session: Session, bucket: str, blob_prefix: str):
+    (node_curies, normal_dict) = get_node_data(session, use_uniprot=True)
+    node_metadata = write_nodes(node_curies, normal_dict, 'nodes.tsv.gz')
+    services.upload_to_gcp(bucket, 'nodes.tsv.gz', f'{blob_prefix}nodes.tsv.gz')
+
+
 def export_kg(session: Session, bucket: str, blob_prefix: str,
+              assertion_start: int = 0, assertion_limit: int = 600000,
               use_uniprot: bool = False, chunk_size=100, edge_limit: int = 0) -> None:  # pragma: no cover
     """
     Create and upload the node and edge KGX files for targeted assertions.
@@ -462,26 +476,25 @@ def export_kg(session: Session, bucket: str, blob_prefix: str,
     :param chunk_size: the number of assertions to process at a time
     :param edge_limit: the maximum number of supporting study results per edge to include in the JSON blob (0 is no limit)
     """
-    (node_curies, normal_dict) = get_node_data(session, use_uniprot=use_uniprot)
-    node_metadata = write_nodes(node_curies, normal_dict, 'nodes.tsv.gz')
-    services.upload_to_gcp(bucket, 'nodes.tsv.gz', f'{blob_prefix}nodes.tsv.gz')
-    id_list = get_assertion_ids(session)
-    edge_metadata = {}
+    output_filename = f'edges_{assertion_start}_{assertion_start + assertion_limit}.tsv'
+    id_list = get_assertion_ids(session, limit=assertion_limit, offset=assertion_start)
+    # edge_metadata = {}
     for rows in get_edge_data(session, id_list, chunk_size, edge_limit):
         logging.info(f'Processing the next {len(rows)} rows')
         edge_dict = create_edge_dict(rows)
-        edge_metadata = get_edge_metadata(rows, edge_metadata, normal_dict)
-        write_edges_3(edge_dict, 'edges.tsv')
-    with open('edges.tsv', 'rb') as edgefile:
-        with gzip.open('edges.tsv.gz', 'wb') as gzfile:
-            shutil.copyfileobj(edgefile, gzfile)
+        # edge_metadata = get_edge_metadata(rows, edge_metadata, normal_dict)
+        write_edges_3(edge_dict, output_filename)
+    services.upload_to_gcp(bucket, output_filename, f'{blob_prefix}{output_filename}')
+    # with open('edges.tsv', 'rb') as edgefile:
+    #     with gzip.open('edges.tsv.gz', 'wb') as gzfile:
+    #         shutil.copyfileobj(edgefile, gzfile)
     # edge_data = get_edge_data(session, id_list, chunk_size, edge_limit)
     # edge_metadata = get_edge_metadata(edge_data, normal_dict)
     # edge_dict = create_edge_dict(edge_data)
     # write_edges_2(edge_dict, 'edges.tsv.gz')
     # edge_metadata = write_edges(session, normal_dict, "edges.tsv.gz", use_uniprot=use_uniprot, limit=edge_limit)
 
-    services.upload_to_gcp(bucket, 'edges.tsv.gz', f'{blob_prefix}edges.tsv.gz')
-    create_kge_tarball('tmp', node_metadata, edge_metadata)
-    os.remove('edges.tsv')
-    services.upload_to_gcp(bucket, 'targeted_assertions.tar.gz', f'{blob_prefix}targeted_assertions.tar.gz')
+    # services.upload_to_gcp(bucket, 'edges.tsv.gz', f'{blob_prefix}edges.tsv.gz')
+    # create_kge_tarball('tmp', node_metadata, edge_metadata)
+    # os.remove('edges.tsv')
+    # services.upload_to_gcp(bucket, 'targeted_assertions.tar.gz', f'{blob_prefix}targeted_assertions.tar.gz')
