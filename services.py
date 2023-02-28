@@ -200,11 +200,18 @@ def is_normal(curie: str, normalized_nodes: dict[str, dict]) -> bool:
     :param normalized_nodes: the normalization dictionary
     :returns true if the curie exists and is useable, false otherwise
     """
+    type_check = True
+    if curie.startswith('CHEBI') and normalized_nodes[curie] is not None:
+        if not 'type' in normalized_nodes[curie]:
+            type_check = False
+        elif normalized_nodes[curie]['type'][0] not in \
+            ['biolink:SmallMolecule', 'biolink:MolecularMixture', 'biolink:Drug']:
+            type_check = False
     return curie in normalized_nodes \
         and normalized_nodes[curie] is not None \
         and 'id' in normalized_nodes[curie] \
         and 'label' in normalized_nodes[curie]['id'] \
-        and (not curie.startswith('CHEBI') or 'biolink:SmallMolecule' == normalized_nodes[curie]['type'][0] if 'type' in normalized_nodes[curie] else 'biolink:NamedThing')
+        and type_check
 
 
 def get_kgx_nodes(curies: list[str], normalized_nodes: dict[str, dict]) -> Iterator[list[str]]:

@@ -222,7 +222,7 @@ def get_edge(rows, predicate):
         subject_form_or_variant_qualifier = 'biolink:gain_of_function_variant_form'
     elif predicate == 'biolink:loss_of_function_contributes_to':
         predicate = 'biolink:affects'
-        qualified_predicate = 'biolink:causes'
+        qualified_predicate = 'biolink:contributes_to'
         subject_form_or_variant_qualifier = 'biolink:loss_of_function_variant_form'
     return [sub, predicate, obj, qualified_predicate,
             subject_aspect_qualifier, subject_direction_qualifier,
