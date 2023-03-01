@@ -209,21 +209,21 @@ def get_edge(rows, predicate):
     if predicate == 'biolink:entity_positively_regulates_entity':
         predicate = 'biolink:affects'
         qualified_predicate = 'biolink:causes'
-        object_aspect_qualifier = 'biolink:activity_or_abundance'
-        object_direction_qualifier = 'biolink:increased'
+        object_aspect_qualifier = 'activity_or_abundance'
+        object_direction_qualifier = 'increased'
     elif predicate == 'biolink:entity_negatively_regulates_entity':
         predicate = 'biolink:affects'
         qualified_predicate = 'biolink:causes'
-        object_aspect_qualifier = 'biolink:activity_or_abundance'
-        object_direction_qualifier = 'biolink:decreased'
+        object_aspect_qualifier = 'activity_or_abundance'
+        object_direction_qualifier = 'decreased'
     elif predicate == 'biolink:gain_of_function_contributes_to':
         predicate = 'biolink:affects'
         qualified_predicate = 'biolink:contributes_to'
-        subject_form_or_variant_qualifier = 'biolink:gain_of_function_variant_form'
+        subject_form_or_variant_qualifier = 'gain_of_function_variant_form'
     elif predicate == 'biolink:loss_of_function_contributes_to':
         predicate = 'biolink:affects'
         qualified_predicate = 'biolink:contributes_to'
-        subject_form_or_variant_qualifier = 'biolink:loss_of_function_variant_form'
+        subject_form_or_variant_qualifier = 'loss_of_function_variant_form'
     return [sub, predicate, obj, qualified_predicate,
             subject_aspect_qualifier, subject_direction_qualifier,
             subject_part_qualifier, subject_form_or_variant_qualifier,
