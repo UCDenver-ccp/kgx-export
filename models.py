@@ -4,7 +4,7 @@ from math import fsum
 
 import pymysql.connections
 from google.cloud.sql.connector import Connector
-from sqlalchemy import Column, String, Integer, Boolean, Float, ForeignKey, UniqueConstraint, create_engine
+from sqlalchemy import Column, String, Integer, Boolean, Float, DateTime, Text, ForeignKey, UniqueConstraint, create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from sqlalchemy.orm import sessionmaker
@@ -21,13 +21,16 @@ class Assertion(Model):
     object_curie = Column(String(100), ForeignKey('pr_to_uniprot.pr'))
     association_curie = Column(String(100))
     evidence_list = relationship('Evidence', back_populates='assertion', lazy='subquery',
-                                 primaryjoin='and_(Assertion.assertion_id==Evidence.assertion_id, Evidence.superseded_by.is_(None))')
+                                 primaryjoin='and_(Assertion.assertion_id==Evidence.assertion_id, '
+                                             'Evidence.superseded_by.is_(None))')
     subject_uniprot = relationship('PRtoUniProt', foreign_keys=subject_curie, lazy='joined')
     object_uniprot = relationship('PRtoUniProt', foreign_keys=object_curie, lazy='joined')
     subject_idf = relationship('ConceptIDF', viewonly=True, foreign_keys=subject_curie, lazy='subquery',
-                               primaryjoin='and_(Assertion.subject_curie==ConceptIDF.concept_curie, ConceptIDF.level=="document")')
+                               primaryjoin='and_(Assertion.subject_curie==ConceptIDF.concept_curie, '
+                                           'ConceptIDF.level=="document")')
     object_idf = relationship('ConceptIDF', viewonly=True, foreign_keys=object_curie, lazy='subquery',
-                              primaryjoin='and_(Assertion.object_curie==ConceptIDF.concept_curie, ConceptIDF.level=="document")')
+                              primaryjoin='and_(Assertion.object_curie==ConceptIDF.concept_curie, '
+                                          'ConceptIDF.level=="document")')
 
     def __init__(self, assertion_id, subject_curie, object_curie, association):
         self.assertion_id = assertion_id
@@ -93,8 +96,42 @@ class Assertion(Model):
             relevant_evidence = relevant_evidence[:limit]
         supporting_study_results = '|'.join([f'tmkp:{ev.evidence_id}' for ev in relevant_evidence])
         supporting_publications = '|'.join([ev.document_id for ev in relevant_evidence])
-        return [self.subject_curie, predicate, self.object_curie, self.assertion_id,
-                self.association_curie, self.get_aggregate_score(predicate), supporting_study_results, supporting_publications,
+        qualified_predicate = ''
+        subject_aspect_qualifier = ''
+        subject_direction_qualifier = ''
+        subject_part_qualifier = ''
+        subject_form_or_variant_qualifier = ''
+        object_aspect_qualifier = ''
+        object_direction_qualifier = ''
+        object_part_qualifier = ''
+        object_form_or_variant_qualifier = ''
+        anatomical_context_qualifier = ''
+        if predicate == 'biolink:entity_positively_regulates_entity':
+            predicate = 'biolink:affects'
+            qualified_predicate = 'biolink:causes'
+            object_aspect_qualifier = 'biolink:activity_or_abundance'
+            object_direction_qualifier = 'biolink:increased'
+        elif predicate == 'biolink:entity_negatively_regulates_entity':
+            predicate = 'biolink:affects'
+            qualified_predicate = 'biolink:causes'
+            object_aspect_qualifier = 'biolink:activity_or_abundance'
+            object_direction_qualifier = 'biolink:decreased'
+        elif predicate == 'biolink:gain_of_function_contributes_to':
+            predicate = 'biolink:affects'
+            qualified_predicate = 'biolink:contributes_to'
+            subject_form_or_variant_qualifier = 'biolink:gain_of_function_variant_form'
+        elif predicate == 'biolink:loss_of_function_contributes_to':
+            predicate = 'biolink:affects'
+            qualified_predicate = 'biolink:causes'
+            subject_form_or_variant_qualifier = 'biolink:loss_of_function_variant_form'
+        return [self.subject_curie, predicate, self.object_curie, qualified_predicate,
+                subject_aspect_qualifier, subject_direction_qualifier,
+                subject_part_qualifier, subject_form_or_variant_qualifier,
+                object_aspect_qualifier, object_direction_qualifier,
+                object_part_qualifier, object_form_or_variant_qualifier,
+                anatomical_context_qualifier,
+                self.assertion_id, self.association_curie, self.get_aggregate_score(predicate),
+                supporting_study_results, supporting_publications,
                 self.get_json_attributes(predicate, relevant_evidence, evidence_count)]
 
     def get_other_edges_kgx(self, limit=0) -> list:
@@ -190,20 +227,24 @@ class Entity(Model):
 class Evaluation(Model):
     __tablename__ = 'evaluation'
     id = Column(Integer, primary_key=True)
-    assertion_id = Column(String(65), ForeignKey('assertion.assertion_id'))
+    evidence_id = Column(String(65), ForeignKey('evidence.evidence_id'))
     overall_correct = Column(Boolean)
     subject_correct = Column(Boolean)
     object_correct = Column(Boolean)
     predicate_correct = Column(Boolean)
-    api_keys_id = Column(Integer)
+    source_id = Column(Integer)
+    create_datetime = Column(DateTime)
+    comments = Column(Text)
 
-    def __init__(self, assertion_id, overall_correct, subject_correct, object_correct, predicate_correct, api_keys_id):
-        self.assertion_id = assertion_id
+    def __init__(self, evidence_id, overall_correct, subject_correct, object_correct, predicate_correct, source_id, create_datetime, comments):
+        self.evidence_id = evidence_id
         self.overall_correct = overall_correct
         self.subject_correct = subject_correct
         self.object_correct = object_correct
         self.predicate_correct = predicate_correct
-        self.api_keys_id = api_keys_id
+        self.source_id = source_id
+        self.create_datetime = create_datetime
+        self.comments = comments
 
 
 class Evidence(Model):
@@ -327,6 +368,7 @@ class Evidence(Model):
             "value": f"tmkp:{self.evidence_id}",
             "value_type_id": "biolink:TextMiningResult",
             # "description": "a single result from running NLP tool over a piece of text",
+            "value_url": f"https://tmui.text-mining-kp.org/evidence/{self.evidence_id}",
             "attribute_source": "infores:text-mining-provider-targeted",
             "attributes": nested_attributes
         }
@@ -347,7 +389,7 @@ class EvidenceScore(Model):
 
 class PRtoUniProt(Model):
     __tablename__ = 'pr_to_uniprot'
-    pr = Column(String(100), ForeignKey('cooccurrence.entity1_curie'), ForeignKey('cooccurrence.entity2_curie'), primary_key=True)
+    pr = Column(String(100), primary_key=True)
     uniprot = Column(String(100))
     taxon = Column(String(100))
     UniqueConstraint('pr', 'uniprot', name='pr+uniprot')
@@ -390,59 +432,10 @@ class DocumentYear(Model):
         self.year = year
 
 
-# class Semmed(Model):
-#     __tablename__ = 'semmed'
-#     sid = Column('id', Integer, ForeignKey('tm_semmed.semmed_id'), primary_key=True)
-#     pmid = Column(String(45))
-#     sen_start_index = Column(Integer)
-#     sentence = Column(String(2000))
-#     sen_end_index = Column(Integer)
-#     predicate = Column(String(45))
-#     subject_cui = Column(String(45), ForeignKey('umls_to_obo.umls'))
-#     subject_name = Column(String(250))
-#     subject_curie = relationship('UmlsToObo', foreign_keys=subject_cui, lazy='joined')
-#     object_cui = Column(String(45), ForeignKey('umls_to_obo.umls'))
-#     object_name = Column(String(250))
-#     object_curie = relationship('UmlsToObo', foreign_keys=object_cui, lazy='joined')
-#     subject_start_index = Column(Integer)
-#     subject_end_index = Column(Integer)
-#     predicate_start_index = Column(Integer)
-#     predicate_end_index = Column(Integer)
-#
-#     def __init__(self, pmid, sen_start_index, sentence, sen_end_index, predicate,
-#                  subject_cui, subject_name, object_cui, object_name,
-#                  subject_start_index, subject_end_index, predicate_start_index, predicate_end_index):
-#         self.pmid = pmid
-#         self.sen_start_index = sen_start_index
-#         self.sentence = sentence
-#         self.sen_end_index = sen_end_index
-#         self.predicate = predicate
-#         self.subject_cui = subject_cui
-#         self.subject_name = subject_name
-#         self.object_cui = object_cui
-#         self.object_name = object_name
-#         self.subject_start_index = subject_start_index
-#         self.subject_end_index = subject_end_index
-#         self.predicate_start_index = predicate_start_index
-#         self.predicate_end_index = predicate_end_index
-#
-#
-# class UmlsToObo(Model):
-#     __tablename__ = 'umls_to_obo'
-#     umls = Column(String(20), ForeignKey('semmed.subject_cui'), ForeignKey('semmed.object_cui'), primary_key=True)
-#     obo = Column(String(20), primary_key=True)
-#
-#     def __init__(self, umls, obo):
-#         self.umls = umls
-#         self.obo = obo
-
-
 class TmSemmed(Model):
     __tablename__ = 'tm_semmed'
     tm_id = Column(String(65), ForeignKey(Evidence.evidence_id), primary_key=True)
-    # semmed_id = Column(Integer, ForeignKey(Semmed.sid), primary_key=True)
     semmed_id = Column(Integer, primary_key=True)
-    # semmed = relationship('Semmed', foreign_keys=semmed_id, lazy='joined')
 
     def __init__(self, tm_id, semmed_id):
         self.tm_id = tm_id
