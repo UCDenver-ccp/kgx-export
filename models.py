@@ -435,9 +435,7 @@ class DocumentYear(Model):
 class TmSemmed(Model):
     __tablename__ = 'tm_semmed'
     tm_id = Column(String(65), ForeignKey(Evidence.evidence_id), primary_key=True)
-    # semmed_id = Column(Integer, ForeignKey(Semmed.sid), primary_key=True)
     semmed_id = Column(Integer, primary_key=True)
-    # semmed = relationship('Semmed', foreign_keys=semmed_id, lazy='joined')
 
     def __init__(self, tm_id, semmed_id):
         self.tm_id = tm_id

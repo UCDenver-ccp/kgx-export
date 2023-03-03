@@ -57,7 +57,7 @@ if __name__ == "__main__":
         if args.target == 'nodes':
             targeted.export_nodes(session, uniprot_bucket, 'kgx/UniProt/')
         else:
-            targeted.export_kg(session, uniprot_bucket, 'kgx/UniProt/',
-                               assertion_start=args.assertion_offset, assertion_limit=args.assertion_limit,
-                               chunk_size=args.chunk_size, edge_limit=args.limit)
+            targeted.export_edges(session, uniprot_bucket, 'kgx/UniProt/',
+                                  assertion_start=args.assertion_offset, assertion_limit=args.assertion_limit,
+                                  chunk_size=args.chunk_size, edge_limit=args.limit)
     logging.info("End Main")
