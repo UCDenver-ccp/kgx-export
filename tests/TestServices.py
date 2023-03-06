@@ -1,10 +1,8 @@
 import unittest
 import os
-import json
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from typing import Iterator
-import models
 import services
 
 class ServicesTestCase(unittest.TestCase):
@@ -18,7 +16,6 @@ class ServicesTestCase(unittest.TestCase):
         session = sessionmaker()
         session.configure(bind=self.engine)
         self.session = session()
-        models.Model.metadata.create_all(self.engine)
         self.normalized_nodes = {
             "CHEBI:24433": {
                 "id": {
