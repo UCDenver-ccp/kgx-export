@@ -29,12 +29,12 @@ def get_node_data(session: Session, use_uniprot: bool = False) -> (list[str], di
     if use_uniprot:
         curies = [row[0] for row in session.query(sqlalchemy.text('DISTINCT IFNULL(uniprot, subject_curie) as curie '
                                                                   'FROM assertion LEFT JOIN pr_to_uniprot ON '
-                                                                  'subject_curie = pr AND taxon = '
-                                                                  '"NCBITaxon:9606"')).all()]
+                                                                  'subject_curie = pr AND '
+                                                                  f'taxon = "{HUMAN_TAXON}"')).all()]
         curies.extend([row[0] for row in session.query(sqlalchemy.text('DISTINCT IFNULL(uniprot, object_curie) as '
                                                                        'curie FROM assertion LEFT JOIN pr_to_uniprot '
-                                                                       'ON object_curie = pr AND taxon = '
-                                                                       '"NCBITaxon:9606"')).all()])
+                                                                       f'ON object_curie = pr AND '
+                                                                       f'taxon = "{HUMAN_TAXON}"')).all()])
     else:
         curies = [row[0] for row in session.query(sqlalchemy.text('DISTINCT subject_curie FROM assertion')).all()]
         curies.extend([row[0] for row in session.query(sqlalchemy.text('DISTINCT object_curie FROM assertion')).all()])
@@ -69,6 +69,7 @@ def write_nodes(curies: list[str], normalize_dict: dict[str, dict], output_filen
     return metadata_dict
 
 
+# TODO: Join this query to the new feedback schema
 def get_assertion_ids(session, limit=600000, offset=0):
     id_query = text('SELECT assertion_id FROM assertion WHERE assertion_id NOT IN '
                     '(SELECT DISTINCT(assertion_id) '
@@ -106,8 +107,8 @@ def get_edge_data(session: Session, id_list, chunk_size=1000, edge_limit=5) -> l
         '(SELECT * FROM top_evidences te LEFT JOIN tm_semmed ts ON ts.tm_id = te.evidence_id '
         f'WHERE te.assertion_id = a.assertion_id ORDER BY ts.semmed_id IS NULL LIMIT {edge_limit}) AS e '
         'ON a.assertion_id = e.assertion_id '
-        'LEFT JOIN pr_to_uniprot su ON a.subject_curie = su.pr AND su.taxon = "NCBITaxon:9606" '
-        'LEFT JOIN pr_to_uniprot ou ON a.object_curie = ou.pr AND ou.taxon = "NCBITaxon:9606" '
+        f'LEFT JOIN pr_to_uniprot su ON a.subject_curie = su.pr AND su.taxon = "{HUMAN_TAXON}" '
+        f'LEFT JOIN pr_to_uniprot ou ON a.object_curie = ou.pr AND ou.taxon = "{HUMAN_TAXON}" '
         'LEFT JOIN concept_idf si ON a.subject_curie = si.concept_curie '
         'LEFT JOIN concept_idf oi ON a.object_curie = oi.concept_curie '
         'WHERE a.assertion_id IN :ids AND e.document_zone <> "REF" AND e.superseded_by IS NULL '
