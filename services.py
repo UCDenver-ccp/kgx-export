@@ -419,11 +419,16 @@ def get_edge(rows, predicate):
             supporting_study_results, supporting_publications, get_assertion_json(relevant_rows)]
 
 
-def write_edges(edge_dict, output_filename):
+def write_edges(edge_dict, nodes, output_filename):
     logging.info("Starting edge output")
     skipped_assertions = set([])
     with open(output_filename, 'a') as outfile:
         for assertion, rows in edge_dict.items():
+            row1 = rows[0]
+            sub = row1['subject_uniprot'] if row1['subject_uniprot'] else row1['subject_curie']
+            obj = row1['object_uniprot'] if row1['object_uniprot'] else row1['object_curie']
+            if sub not in nodes or obj not in nodes:
+                continue
             predicates = set([row['predicate_curie'] for row in rows])
             for predicate in predicates:
                 edge = get_edge(rows, predicate)

@@ -1,3 +1,4 @@
+import gzip
 import logging
 import os
 
@@ -21,6 +22,15 @@ def export_metadata(bucket):
     services.upload_to_gcp(bucket, 'edges.tsv.gz', GCP_BLOB_PREFIX + 'edges.tsv.gz')
     services.upload_to_gcp(bucket, 'KGE/content_metadata.json', GCP_BLOB_PREFIX + 'content_metadata.json')
     services.upload_to_gcp(bucket, 'targeted_assertions.tar.gz', GCP_BLOB_PREFIX + 'targeted_assertions.tar.gz')
+
+
+def get_valid_nodes(bucket) -> set[str]:
+    services.get_from_gcp(bucket, GCP_BLOB_PREFIX + 'nodes.tsv.gz', 'nodes.tsv.gz')
+    node_set = set([])
+    with gzip.open('nodes.tsv.gz', 'rb') as infile:
+        for line in infile:
+            node_set.add(line.split(b'\t')[0].decode('utf-8'))
+    return node_set
 
 
 def init_db(instance: str, user: str, password: str, database: str) -> sessionmaker:  # pragma: no cover
@@ -79,7 +89,8 @@ if __name__ == "__main__":
         if args.target == 'nodes':
             targeted.export_nodes(session_maker(), uniprot_bucket, GCP_BLOB_PREFIX)
         else:
-            targeted.export_edges(session_maker(), uniprot_bucket, GCP_BLOB_PREFIX,
+            nodes = get_valid_nodes(uniprot_bucket)
+            targeted.export_edges(session_maker(), nodes, uniprot_bucket, GCP_BLOB_PREFIX,
                                   assertion_start=args.assertion_offset, assertion_limit=args.assertion_limit,
                                   chunk_size=args.chunk_size, edge_limit=args.limit)
     logging.info("End Main")

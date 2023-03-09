@@ -80,4 +80,4 @@ with models.DAG(dag_id='targeted-parallel', default_args=default_args,
         task_id='targeted-cleanup',
         bash_command=f"gsutil rm {' '.join(filename_list)} gs://{UNI_BUCKET}/kgx/UniProt/edges.tsv")
 
-    export_task_list >> export_nodes >> combine_files >> generate_metadata >> cleanup_files
+    export_nodes >> export_task_list >> combine_files >> generate_metadata >> cleanup_files

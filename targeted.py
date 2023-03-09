@@ -137,13 +137,14 @@ def export_nodes(session: Session, bucket: str, blob_prefix: str):
     services.upload_to_gcp(bucket, 'nodes.tsv.gz', f'{blob_prefix}nodes.tsv.gz')
 
 
-def export_edges(session: Session, bucket: str, blob_prefix: str,
+def export_edges(session: Session, nodes: set, bucket: str, blob_prefix: str,
                  assertion_start: int = 0, assertion_limit: int = 600000,
                  chunk_size=100, edge_limit: int = 5) -> None:  # pragma: no cover
     """
     Create and upload the node and edge KGX files for targeted assertions.
 
     :param session: the database session
+    :param nodes: a set of curies that appear in the nodes KGX file
     :param bucket: the output GCP bucket name
     :param blob_prefix: the directory prefix for the uploaded files
     :param assertion_start: offset for assertion query
@@ -156,5 +157,5 @@ def export_edges(session: Session, bucket: str, blob_prefix: str,
     for rows in get_edge_data(session, id_list, chunk_size, edge_limit):
         logging.info(f'Processing the next {len(rows)} rows')
         edge_dict = create_edge_dict(rows)
-        services.write_edges(edge_dict, output_filename)
+        services.write_edges(edge_dict, nodes, output_filename)
     services.upload_to_gcp(bucket, output_filename, f'{blob_prefix}{output_filename}')
