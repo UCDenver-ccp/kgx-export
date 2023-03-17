@@ -269,19 +269,19 @@ def get_assertion_json(rows):
             "attribute_source": "infores:text-mining-provider-targeted"
         },
         {
-            "attribute_type_id": "biolink:has_evidence_count",
+            "attribute_type_id": "biolink:evidence_count",
             "value": row1['evidence_count'],
             "value_type_id": "biolink:EvidenceCount",
             "attribute_source": "infores:text-mining-provider-targeted"
         },
         {
-            "attribute_type_id": "biolink:tmkp_confidence_score",
+            "attribute_type_id": "biolink:extraction_confidence_score",
             "value": get_aggregate_score(rows),
             "value_type_id": "biolink:ConfidenceLevel",
             "attribute_source": "infores:text-mining-provider-targeted"
         },
         {
-            "attribute_type_id": "biolink:supporting_document",
+            "attribute_type_id": "biolink:publications",
             "value": '|'.join([row['document_id'] for row in rows]),
             "value_type_id": "biolink:Publication",
             "attribute_source": "infores:pubmed"
@@ -308,7 +308,7 @@ def get_evidence_json(row):
             "attribute_source": "infores:text-mining-provider-targeted"
         },
         {
-            "attribute_type_id": "biolink:supporting_document",
+            "attribute_type_id": "biolink:publications",
             "value": row['document_id'],
             "value_type_id": "biolink:Publication",
             "value_url": f"https://pubmed.ncbi.nlm.nih.gov/{str(row['document_id']).split(':')[-1]}/",
@@ -358,7 +358,7 @@ def get_evidence_json(row):
             }
         )
     return {
-        "attribute_type_id": "biolink:supporting_study_result",
+        "attribute_type_id": "biolink:has_supporting_study_result",
         "value": f"tmkp:{row['evidence_id']}",
         "value_type_id": "biolink:TextMiningResult",
         "value_url": f"https://tmui.text-mining-kp.org/evidence/{row['evidence_id']}",
