@@ -255,6 +255,13 @@ def get_score(row):
 def get_assertion_json(rows):
     semmed_count = sum([row['semmed_flag'] for row in rows])
     row1 = rows[0]
+    supporting_publications = []
+    for row in rows:
+        document_id = row['document_id']
+        if document_id.startswith('PMC') and ':' not in document_id:
+            supporting_publications.append(document_id.replace('PMC', 'PMC:'))
+        else:
+            supporting_publications.append(document_id)
     attributes_list = [
         {
             "attribute_type_id": "biolink:primary_knowledge_source",
@@ -282,8 +289,8 @@ def get_assertion_json(rows):
         },
         {
             "attribute_type_id": "biolink:publications",
-            "value": '|'.join([row['document_id'] for row in rows]),
-            "value_type_id": "biolink:Publication",
+            "value": supporting_publications,
+            "value_type_id": "biolink:Uriorcurie",
             "attribute_source": "infores:pubmed"
         }
     ]
@@ -300,6 +307,9 @@ def get_assertion_json(rows):
 
 
 def get_evidence_json(row):
+    document_id = row['document_id']
+    if document_id.startswith('PMC') and ':' not in document_id:
+        document_id = document_id.replace('PMC', 'PMC:')
     nested_attributes = [
         {
             "attribute_type_id": "biolink:supporting_text",
@@ -309,8 +319,8 @@ def get_evidence_json(row):
         },
         {
             "attribute_type_id": "biolink:publications",
-            "value": row['document_id'],
-            "value_type_id": "biolink:Publication",
+            "value": document_id,
+            "value_type_id": "biolink:Uriorcurie",
             "value_url": f"https://pubmed.ncbi.nlm.nih.gov/{str(row['document_id']).split(':')[-1]}/",
             "attribute_source": "infores:pubmed"
         },
@@ -380,7 +390,14 @@ def get_edge(rows, predicate):
     sub = row1['subject_uniprot'] if row1['subject_uniprot'] else row1['subject_curie']
     obj = row1['object_uniprot'] if row1['object_uniprot'] else row1['object_curie']
     supporting_study_results = '|'.join([f"tmkp:{row['evidence_id']}" for row in relevant_rows])
-    supporting_publications = '|'.join([row['document_id'] for row in relevant_rows])
+    supporting_publications = []
+    for row in relevant_rows:
+        document_id = row['document_id']
+        if document_id.startswith('PMC') and ':' not in document_id:
+            supporting_publications.append(document_id.replace('PMC', 'PMC:'))
+        else:
+            supporting_publications.append(document_id)
+    supporting_publications_string = '|'.join(supporting_publications)
     qualified_predicate = ''
     subject_aspect_qualifier = ''
     subject_direction_qualifier = ''
@@ -416,7 +433,7 @@ def get_edge(rows, predicate):
             object_part_qualifier, object_form_or_variant_qualifier,
             anatomical_context_qualifier,
             row1['assertion_id'], row1['association_curie'], get_aggregate_score(relevant_rows),
-            supporting_study_results, supporting_publications, get_assertion_json(relevant_rows)]
+            supporting_study_results, supporting_publications_string, get_assertion_json(relevant_rows)]
 
 
 def write_edges(edge_dict, nodes, output_filename):
