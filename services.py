@@ -486,24 +486,18 @@ def generate_metadata(edgefile, nodefile, outdir):
     edge_file = os.path.join(outdir, "edges.tsv")
     metadata_file = os.path.join(outdir, "content_metadata.json")
 
-    node_lines = open(nodefile, 'r').readlines()
-    nodes = [node_line.strip().split('\t') for node_line in node_lines]
+    node_lines = gzip.open(nodefile, 'rb').readlines()
+    nodes = [node_line.decode().strip().split('\t') for node_line in node_lines]
     curies = [node[0] for node in nodes]
     for node in nodes:
         node_metadata_dict = update_node_metadata(node, node_metadata_dict, PRIMARY_KNOWLEDGE_SOURCE)
     normalized_nodes = get_normalized_nodes(curies)
-    with open(node_file, 'w') as outfile:
-        tmp = outfile.write('\t'.join(node_headers) + '\n')
-        for line in node_lines:
-            tmp = outfile.write(line)
 
     edge_metadata_dict = {}
-    with open(edgefile) as infile:
-        with open(edge_file, 'w') as outfile:
-            tmp = outfile.write('\t'.join(edge_headers) + '\n')
-            for line in infile:
-                tmp = outfile.write(line)
-                edge_metadata_dict = update_edge_metadata(line.split('\t'), edge_metadata_dict, normalized_nodes, PRIMARY_KNOWLEDGE_SOURCE)
+    with gzip.open(edgefile, 'rb') as infile:
+        for line in infile:
+            cols = line.decode().split('\t')
+            edge_metadata_dict = update_edge_metadata(cols, edge_metadata_dict, normalized_nodes, PRIMARY_KNOWLEDGE_SOURCE)
     metadata_dict = {
         "nodes": node_metadata_dict,
         "edges": list(edge_metadata_dict.values())
@@ -511,5 +505,5 @@ def generate_metadata(edgefile, nodefile, outdir):
     logging.info("Writing metadata file")
     with open(metadata_file, 'w') as outfile:
         outfile.write(json.dumps(metadata_dict))
-    logging.info("Creating tarball")
-    shutil.make_archive('targeted_assertions', 'gztar', root_dir=outdir)
+    # logging.info("Creating tarball")
+    # shutil.make_archive('targeted_assertions', 'gztar', root_dir=outdir)
