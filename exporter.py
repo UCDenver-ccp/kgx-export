@@ -11,17 +11,13 @@ from google.cloud.sql.connector import Connector
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-GCP_BLOB_PREFIX = 'kgx/UniProt/'
+GCP_BLOB_PREFIX = 'data/kgx-export/'
 
 def export_metadata(bucket):
-    services.get_from_gcp(bucket, GCP_BLOB_PREFIX + 'edges.tsv', 'edges.tsv')
+    services.get_from_gcp(bucket, GCP_BLOB_PREFIX + 'edges.tsv.gz', 'edges.tsv.gz')
     services.get_from_gcp(bucket, GCP_BLOB_PREFIX + 'nodes.tsv.gz', 'nodes.tsv.gz')
-    services.decompress('nodes.tsv.gz', 'nodes.tsv')
-    services.generate_metadata('edges.tsv', 'nodes.tsv', 'KGE')
-    services.compress('edges.tsv', 'edges.tsv.gz')
-    services.upload_to_gcp(bucket, 'edges.tsv.gz', GCP_BLOB_PREFIX + 'edges.tsv.gz')
+    services.generate_metadata('edges.tsv.gz', 'nodes.tsv.gz', 'KGE')
     services.upload_to_gcp(bucket, 'KGE/content_metadata.json', GCP_BLOB_PREFIX + 'content_metadata.json')
-    services.upload_to_gcp(bucket, 'targeted_assertions.tar.gz', GCP_BLOB_PREFIX + 'targeted_assertions.tar.gz')
 
 
 def get_valid_nodes(bucket) -> set[str]:
