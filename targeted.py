@@ -6,6 +6,7 @@ import sqlalchemy
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from evidence import Evidence
 import services
 
 ROW_BATCH_SIZE = 10000
@@ -69,14 +70,12 @@ def write_nodes(curies: list[str], normalize_dict: dict[str, dict], output_filen
     return metadata_dict
 
 
-# TODO: Join this query to the new feedback schema
 def get_assertion_ids(session, limit=600000, offset=0):
     id_query = text('SELECT assertion_id FROM assertion WHERE assertion_id NOT IN '
                     '(SELECT DISTINCT(assertion_id) '
-                    'FROM evaluation INNER JOIN evidence '
-                    'ON evidence.evidence_id = evaluation.evidence_id '
-                    'WHERE overall_correct = 0 OR subject_correct = 0 '
-                    'OR object_correct = 0 OR predicate_correct = 0) '
+                    'FROM assertion_evidence_feedback af INNER JOIN evidence_feedback_answer ef INNER JOIN evidence e '
+                    'ON e.evidence_id = af.evidence_id '
+                    'WHERE ef.prompt_text = \'Assertion Correct\' AND ef.response = 0) '
                     'AND subject_curie NOT IN :ex1 AND object_curie NOT IN :ex2 '
                     'ORDER BY assertion_id '
                     'LIMIT :limit OFFSET :offset'
@@ -99,12 +98,12 @@ def get_edge_data(session: Session, id_list, chunk_size=1000, edge_limit=5) -> l
         'si.idf AS subject_idf, oi.idf AS object_idf, '
         'e.document_id, e.document_zone, e.document_year, e.score, '
         'e.sentence, e.subject_span, e.subject_text, e.object_span, e.object_text, '
-        '(SELECT COUNT(1) FROM top_evidences t2 '
+        '(SELECT COUNT(1) FROM top_unique_evidences t2 '
         'WHERE t2.assertion_id = a.assertion_id AND t2.predicate_curie = e.predicate_curie) AS evidence_count, '
         'IF(e.tm_id IS NULL, 0, 1) AS semmed_flag '
         'FROM assertion a '
         'INNER JOIN LATERAL '
-        '(SELECT * FROM top_evidences te LEFT JOIN tm_semmed ts ON ts.tm_id = te.evidence_id '
+        '(SELECT * FROM top_unique_evidences te LEFT JOIN tm_semmed ts ON ts.tm_id = te.evidence_id '
         f'WHERE te.assertion_id = a.assertion_id ORDER BY ts.semmed_id IS NULL LIMIT {edge_limit}) AS e '
         'ON a.assertion_id = e.assertion_id '
         f'LEFT JOIN pr_to_uniprot su ON a.subject_curie = su.pr AND su.taxon = "{HUMAN_TAXON}" '
@@ -118,6 +117,55 @@ def get_edge_data(session: Session, id_list, chunk_size=1000, edge_limit=5) -> l
         slice_end = i + chunk_size if i + chunk_size < len(id_list) else len(id_list)
         logging.info(f'Working on slice [{i}:{slice_end}]')
         yield [row for row in session.execute(main_query, {'ids': id_list[i:slice_end]})]
+
+
+def get_superseded_chunk(session: Session) -> list[tuple[str, str]]:
+    query_text = text("""
+    SELECT e1.evidence_id, e2.document_id
+    FROM assertion a1 
+        INNER JOIN evidence e1 ON (e1.assertion_id = a1.assertion_id) 
+        INNER JOIN top_evidence_scores es1 ON (es1.evidence_id = e1.evidence_id)
+        INNER JOIN pubmed_to_pmc t ON t.pmid = e1.document_id
+        INNER JOIN evidence e2 ON (e2.document_id = t.pmcid)
+        INNER JOIN top_evidence_scores es2 ON (es2.evidence_id = e2.evidence_id)
+        INNER JOIN assertion a2 ON (a2.assertion_id = e2.assertion_id)
+    WHERE 
+        e1.document_id LIKE 'PMID%' 
+        AND e1.superseded_by IS NULL
+        AND e1.document_id IN (SELECT pmid FROM pubmed_to_pmc)
+        AND e1.sentence = e2.sentence
+        AND e1.document_zone = e2.document_zone
+        AND a1.subject_curie = a2.subject_curie
+        AND a1.object_curie = a2.object_curie
+        AND es1.predicate_curie = es2.predicate_curie
+    LIMIT 1000
+    """)
+    eids = set([])
+    ids_list = []
+    for row in session.execute(query_text):
+        eid = row['evidence_id']
+        did = row['document_id']
+        if eid not in eids:
+            ids_list.append((eid, did))
+            eids.add(eid)
+    logging.info(len(ids_list))
+    return ids_list
+
+
+def update_superseded_by(session: Session, ids_list: list[tuple[str, str]]) -> None:
+    logging.info("starting update function")
+    mappings = []
+    for ids in ids_list:
+        mappings.append({
+            'evidence_id': ids[0],
+            'superseded_by': ids[1]
+        })
+    # print(mappings)
+    logging.info('about to update: ' + str(len(mappings)))
+    session.bulk_update_mappings(Evidence, mappings)
+    logging.info('bulk update created')
+    session.commit()
+    logging.info('update committed')
 
 
 # This is a simple transformation to group all evidence that belongs to the same assertion and make lookups possible.
