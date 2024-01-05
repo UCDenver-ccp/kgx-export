@@ -5,15 +5,44 @@ import math
 import sqlalchemy
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from sqlalchemy import Column, String, Integer
+from sqlalchemy.orm import declarative_base
 
-from evidence import Evidence
 import services
+Model = declarative_base(name='Model')
 
 ROW_BATCH_SIZE = 10000
 HUMAN_TAXON = 'NCBITaxon:9606'
 ORIGINAL_KNOWLEDGE_SOURCE = "infores:text-mining-provider-targeted"
 EXCLUDED_FIG_CURIES = ['DRUGBANK:DB10633', 'PR:000006421', 'PR:000008147', 'PR:000009005', 'PR:000031137',
                        'PR:Q04746', 'PR:Q04746', 'PR:Q7XZU3']
+
+
+class Evidence(Model):
+    __tablename__ = 'evidence'
+    evidence_id = Column(String(65), primary_key=True)
+    assertion_id = Column(String(65))
+    document_id = Column(String(45))
+    sentence = Column(String(2000))
+    subject_entity_id = Column(String(65))
+    object_entity_id = Column(String(65))
+    document_zone = Column(String(45))
+    document_publication_type = Column(String(100))
+    document_year_published = Column(Integer)
+    superseded_by = Column(String(20))
+
+    def __init__(self, evidence_id, assertion_id, document_id, sentence, subject_entity_id, object_entity_id,
+                 document_zone, document_publication_type, document_year_published, superseded_by):
+        self.evidence_id = evidence_id
+        self.assertion_id = assertion_id
+        self.document_id = document_id
+        self.sentence = sentence
+        self.subject_entity_id = subject_entity_id
+        self.object_entity_id = object_entity_id
+        self.document_zone = document_zone
+        self.document_publication_type = document_publication_type
+        self.document_year_published = document_year_published
+        self.superseded_by = superseded_by
 
 
 def get_node_data(session: Session, use_uniprot: bool = False) -> (list[str], dict[str, dict]):
@@ -73,9 +102,11 @@ def write_nodes(curies: list[str], normalize_dict: dict[str, dict], output_filen
 def get_assertion_ids(session, limit=600000, offset=0):
     id_query = text('SELECT assertion_id FROM assertion WHERE assertion_id NOT IN '
                     '(SELECT DISTINCT(assertion_id) '
-                    'FROM assertion_evidence_feedback af INNER JOIN evidence_feedback_answer ef INNER JOIN evidence e '
-                    'ON e.evidence_id = af.evidence_id '
-                    'WHERE ef.prompt_text = \'Assertion Correct\' AND ef.response = 0) '
+                    'FROM assertion_evidence_feedback af '
+                    'INNER JOIN evidence_feedback_answer ef '
+                    'INNER JOIN evidence e ON e.evidence_id = af.evidence_id '
+                    'INNER JOIN evidence_version ev ON ev.evidence_id = e.evidence_id '
+                    'WHERE ef.prompt_text = \'Assertion Correct\' AND ef.response = 0 AND ev.version = 2) '
                     'AND subject_curie NOT IN :ex1 AND object_curie NOT IN :ex2 '
                     'ORDER BY assertion_id '
                     'LIMIT :limit OFFSET :offset'
@@ -120,6 +151,7 @@ def get_edge_data(session: Session, id_list, chunk_size=1000, edge_limit=5) -> l
 
 
 def get_superseded_chunk(session: Session) -> list[tuple[str, str]]:
+    logging.info("get_superseded_chunk")
     query_text = text("""
     SELECT e1.evidence_id, e2.document_id
     FROM assertion a1 
@@ -138,7 +170,7 @@ def get_superseded_chunk(session: Session) -> list[tuple[str, str]]:
         AND a1.subject_curie = a2.subject_curie
         AND a1.object_curie = a2.object_curie
         AND es1.predicate_curie = es2.predicate_curie
-    LIMIT 1000
+    LIMIT 10000
     """)
     eids = set([])
     ids_list = []
@@ -180,6 +212,7 @@ def create_edge_dict(edge_data):
 
 
 def export_nodes(session: Session, bucket: str, blob_prefix: str):
+    logging.info("Exporting Nodes")
     (node_curies, normal_dict) = get_node_data(session, use_uniprot=True)
     node_metadata = write_nodes(node_curies, normal_dict, 'nodes.tsv.gz')
     services.upload_to_gcp(bucket, 'nodes.tsv.gz', f'{blob_prefix}nodes.tsv.gz')
