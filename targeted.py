@@ -56,18 +56,8 @@ def get_node_data(session: Session, use_uniprot: bool = False) -> (list[str], di
     """
     logging.info("Getting node data")
     logging.info(f"Mode: {'UniProt' if use_uniprot else 'PR'}")
-    if use_uniprot:
-        curies = [row[0] for row in session.query(sqlalchemy.text('DISTINCT IFNULL(uniprot, subject_curie) as curie '
-                                                                  'FROM assertion LEFT JOIN pr_to_uniprot ON '
-                                                                  'subject_curie = pr AND '
-                                                                  f'taxon = "{HUMAN_TAXON}"')).all()]
-        curies.extend([row[0] for row in session.query(sqlalchemy.text('DISTINCT IFNULL(uniprot, object_curie) as '
-                                                                       'curie FROM assertion LEFT JOIN pr_to_uniprot '
-                                                                       f'ON object_curie = pr AND '
-                                                                       f'taxon = "{HUMAN_TAXON}"')).all()])
-    else:
-        curies = [row[0] for row in session.query(sqlalchemy.text('DISTINCT subject_curie FROM assertion')).all()]
-        curies.extend([row[0] for row in session.query(sqlalchemy.text('DISTINCT object_curie FROM assertion')).all()])
+    curies = [row[0] for row in session.query(text('DISTINCT subject_curie FROM targeted.assertion')).all()]
+    curies.extend([row[0] for row in session.query(text('DISTINCT object_curie FROM targeted.assertion')).all()])
     curies = list(set(curies))
     logging.info(f'node curies retrieved and uniquified ({len(curies)})')
     curies = [curie for curie in curies if curie not in EXCLUDED_FIG_CURIES]
@@ -100,7 +90,7 @@ def write_nodes(curies: list[str], normalize_dict: dict[str, dict], output_filen
 
 
 def get_assertion_ids(session, limit=600000, offset=0):
-    id_query = text('SELECT assertion_id FROM assertion WHERE assertion_id NOT IN '
+    id_query = text('SELECT assertion_id FROM targeted.assertion WHERE assertion_id NOT IN '
                     '(SELECT DISTINCT(assertion_id) '
                     'FROM assertion_evidence_feedback af '
                     'INNER JOIN evidence_feedback_answer ef '
@@ -125,23 +115,18 @@ def get_edge_data(session: Session, id_list, chunk_size=1000, edge_limit=5) -> l
     logging.info(f'Partition count: {math.ceil(len(id_list) / chunk_size)}')
     main_query = text(
         'SELECT a.assertion_id, e.evidence_id, a.association_curie, e.predicate_curie, '
-        'a.subject_curie, su.uniprot AS subject_uniprot, a.object_curie, ou.uniprot AS object_uniprot, '
+        'a.subject_curie, a.object_curie, '
         'si.idf AS subject_idf, oi.idf AS object_idf, '
-        'e.document_id, e.document_zone, e.document_year, e.score, '
-        'e.sentence, e.subject_span, e.subject_text, e.object_span, e.object_text, '
-        '(SELECT COUNT(1) FROM top_unique_evidences t2 '
-        'WHERE t2.assertion_id = a.assertion_id AND t2.predicate_curie = e.predicate_curie) AS evidence_count, '
-        'IF(e.tm_id IS NULL, 0, 1) AS semmed_flag '
-        'FROM assertion a '
-        'INNER JOIN LATERAL '
-        '(SELECT * FROM top_unique_evidences te LEFT JOIN tm_semmed ts ON ts.tm_id = te.evidence_id '
-        f'WHERE te.assertion_id = a.assertion_id ORDER BY ts.semmed_id IS NULL LIMIT {edge_limit}) AS e '
-        'ON a.assertion_id = e.assertion_id '
-        f'LEFT JOIN pr_to_uniprot su ON a.subject_curie = su.pr AND su.taxon = "{HUMAN_TAXON}" '
-        f'LEFT JOIN pr_to_uniprot ou ON a.object_curie = ou.pr AND ou.taxon = "{HUMAN_TAXON}" '
+        'e.document_id, e.document_zone, e.document_year_published, e.score, '
+        'e.sentence, e.subject_span, e.subject_covered_text, e.object_span, e.object_covered_text, '
+        '(SELECT COUNT(1) FROM targeted.evidence t2 '
+        'WHERE t2.assertion_id = a.assertion_id AND t2.predicate_curie = e.predicate_curie) AS evidence_count '
+        'FROM targeted.assertion a INNER JOIN LATERAL '
+        '(SELECT * FROM targeted.evidence te WHERE te.assertion_id = a.assertion_id AND te.document_zone <> \'REF\' '
+        f'ORDER BY te.score DESC LIMIT {edge_limit}) AS e ON a.assertion_id = e.assertion_id '
         'LEFT JOIN concept_idf si ON a.subject_curie = si.concept_curie '
         'LEFT JOIN concept_idf oi ON a.object_curie = oi.concept_curie '
-        'WHERE a.assertion_id IN :ids AND e.document_zone <> "REF" AND e.superseded_by IS NULL '
+        'WHERE a.assertion_id IN :ids '
         'ORDER BY a.assertion_id'
     )
     for i in range(0, len(id_list), chunk_size):
