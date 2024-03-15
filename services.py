@@ -253,7 +253,7 @@ def get_score(row):
 
 
 def get_assertion_json(rows):
-    semmed_count = sum([row['semmed_flag'] for row in rows])
+    # semmed_count = sum([row['semmed_flag'] for row in rows])
     row1 = rows[0]
     supporting_publications = []
     for row in rows:
@@ -294,13 +294,13 @@ def get_assertion_json(rows):
             "attribute_source": "infores:pubmed"
         }
     ]
-    if semmed_count > 0:
-        attributes_list.append({
-            "attribute_type_id": "biolink:semmed_agreement_count",
-            "value": semmed_count,
-            "value_type_id": "SIO:000794",
-            "attribute_source": "infores:text-mining-provider-targeted"
-        })
+    # if semmed_count > 0:
+    #     attributes_list.append({
+    #         "attribute_type_id": "biolink:semmed_agreement_count",
+    #         "value": semmed_count,
+    #         "value_type_id": "SIO:000794",
+    #         "attribute_source": "infores:text-mining-provider-targeted"
+    #     })
     for row in rows:
         attributes_list.append(get_evidence_json(row))
     return json.dumps(attributes_list)
@@ -358,15 +358,15 @@ def get_evidence_json(row):
                 "attribute_source": "infores:pubmed"
             }
         )
-    if row['semmed_flag'] == 1:
-        nested_attributes.append(
-            {
-                "attribute_type_id": "biolink:agrees_with_data_source",
-                "value": "infores:semmeddb",
-                "value_type_id": "biolink:InformationResource",
-                "attribute_source": "infores:text-mining-provider-targeted"
-            }
-        )
+    # if row['semmed_flag'] == 1:
+    #     nested_attributes.append(
+    #         {
+    #             "attribute_type_id": "biolink:agrees_with_data_source",
+    #             "value": "infores:semmeddb",
+    #             "value_type_id": "biolink:InformationResource",
+    #             "attribute_source": "infores:text-mining-provider-targeted"
+    #         }
+    #     )
     return {
         "attribute_type_id": "biolink:has_supporting_study_result",
         "value": f"tmkp:{row['evidence_id']}",
@@ -419,13 +419,15 @@ def get_edge(rows, predicate):
         object_aspect_qualifier = 'activity_or_abundance'
         object_direction_qualifier = 'decreased'
     elif predicate == 'biolink:gain_of_function_contributes_to':
-        predicate = 'biolink:affects'
-        qualified_predicate = 'biolink:contributes_to'
-        subject_form_or_variant_qualifier = 'gain_of_function_variant_form'
+        # predicate = 'biolink:affects'
+        # qualified_predicate = 'biolink:contributes_to'
+        # subject_form_or_variant_qualifier = 'gain_of_function_variant_form'
+        return None
     elif predicate == 'biolink:loss_of_function_contributes_to':
-        predicate = 'biolink:affects'
-        qualified_predicate = 'biolink:contributes_to'
-        subject_form_or_variant_qualifier = 'loss_of_function_variant_form'
+        # predicate = 'biolink:affects'
+        # qualified_predicate = 'biolink:contributes_to'
+        # subject_form_or_variant_qualifier = 'loss_of_function_variant_form'
+        return None
     return [sub, predicate, obj, qualified_predicate,
             subject_aspect_qualifier, subject_direction_qualifier,
             subject_part_qualifier, subject_form_or_variant_qualifier,
@@ -455,6 +457,47 @@ def write_edges(edge_dict, nodes, output_filename):
                 line = '\t'.join(str(val) for val in edge) + '\n'
                 throwaway_value = outfile.write(line)
         outfile.flush()
+    logging.info(f'{len(skipped_assertions)} distinct assertions were skipped')
+    logging.info("Edge output complete")
+
+def write_edges_gzip(edge_dict, nodes, output_filename):
+    logging.info("Starting edge output")
+    skipped_assertions = set([])
+    with gzip.open(output_filename, 'ab') as outfile:
+        for assertion, rows in edge_dict.items():
+            row1 = rows[0]
+            sub = row1['subject_uniprot'] if row1['subject_uniprot'] else row1['subject_curie']
+            obj = row1['object_uniprot'] if row1['object_uniprot'] else row1['object_curie']
+            if sub not in nodes or obj not in nodes:
+                continue
+            predicates = set([row['predicate_curie'] for row in rows])
+            for predicate in predicates:
+                edge = get_edge(rows, predicate)
+                if not edge:
+                    skipped_assertions.add(assertion)
+                    continue
+                line = b'\t'.join(bytes(str(val), encoding='utf-8') for val in edge) + b'\n'
+                throwaway_value = outfile.write(line)
+        outfile.flush()
+    logging.info(f'{len(skipped_assertions)} distinct assertions were skipped')
+    logging.info("Edge output complete")
+
+def generate_edges(edge_dict, nodes):
+    logging.info("Starting edge output")
+    skipped_assertions = set([])
+    for assertion, rows in edge_dict.items():
+        row1 = rows[0]
+        sub = row1['subject_uniprot'] if row1['subject_uniprot'] else row1['subject_curie']
+        obj = row1['object_uniprot'] if row1['object_uniprot'] else row1['object_curie']
+        if sub not in nodes or obj not in nodes:
+            continue
+        predicates = set([row['predicate_curie'] for row in rows])
+        for predicate in predicates:
+            edge = get_edge(rows, predicate)
+            if not edge:
+                skipped_assertions.add(assertion)
+                continue
+            yield '\t'.join(str(val) for val in edge) + '\n'
     logging.info(f'{len(skipped_assertions)} distinct assertions were skipped')
     logging.info("Edge output complete")
 
