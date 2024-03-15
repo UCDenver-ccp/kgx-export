@@ -349,11 +349,11 @@ def get_evidence_json(row):
             "attribute_source": "infores:text-mining-provider-targeted "
         }
     ]
-    if row['document_year']:
+    if row['document_year_published']:
         nested_attributes.append(
             {
                 "attribute_type_id": "biolink:supporting_document_year",
-                "value": row['document_year'],
+                "value": row['document_year_published'],
                 "value_type_id": "UO:0000036",
                 "attribute_source": "infores:pubmed"
             }
@@ -383,12 +383,17 @@ def get_edge(rows, predicate):
         logging.debug(f'No relevant rows for predicate {predicate}')
         return None
     row1 = relevant_rows[0]
-    if (row1['object_curie'].startswith('PR:') and not row1['object_uniprot']) or \
-            (row1['subject_curie'].startswith('PR:') and not row1['subject_uniprot']):
+    if row1['object_curie'].startswith('PR:') or row1['subject_curie'].startswith('PR:'):
         logging.debug(f"Could not get uniprot for pr curie ({row1['object_curie']}|{row1['subject_curie']})")
         return None
-    sub = row1['subject_uniprot'] if row1['subject_uniprot'] else row1['subject_curie']
-    obj = row1['object_uniprot'] if row1['object_uniprot'] else row1['object_curie']
+    sub = row1['subject_curie']
+    obj = row1['object_curie']
+    # if (row1['object_curie'].startswith('PR:') and not row1['object_uniprot']) or \
+    #         (row1['subject_curie'].startswith('PR:') and not row1['subject_uniprot']):
+    #     logging.debug(f"Could not get uniprot for pr curie ({row1['object_curie']}|{row1['subject_curie']})")
+    #     return None
+    # sub = row1['subject_uniprot'] if row1['subject_uniprot'] else row1['subject_curie']
+    # obj = row1['object_uniprot'] if row1['object_uniprot'] else row1['object_curie']
     supporting_study_results = '|'.join([f"tmkp:{row['evidence_id']}" for row in relevant_rows])
     supporting_publications = []
     for row in relevant_rows:
@@ -444,8 +449,10 @@ def write_edges(edge_dict, nodes, output_filename):
     with open(output_filename, 'a') as outfile:
         for assertion, rows in edge_dict.items():
             row1 = rows[0]
-            sub = row1['subject_uniprot'] if row1['subject_uniprot'] else row1['subject_curie']
-            obj = row1['object_uniprot'] if row1['object_uniprot'] else row1['object_curie']
+            # sub = row1['subject_uniprot'] if row1['subject_uniprot'] else row1['subject_curie']
+            # obj = row1['object_uniprot'] if row1['object_uniprot'] else row1['object_curie']
+            sub = row1['subject_curie']
+            obj = row1['object_curie']
             if sub not in nodes or obj not in nodes:
                 continue
             predicates = set([row['predicate_curie'] for row in rows])
@@ -506,6 +513,7 @@ def compress(infile, outfile):
     with open(infile, 'rb') as textfile:
         with gzip.open(outfile, 'wb') as gzfile:
             shutil.copyfileobj(textfile, gzfile)
+
 
 def decompress(infile, outfile):
     with gzip.open(infile, 'rb') as gzfile:
