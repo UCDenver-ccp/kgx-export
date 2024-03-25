@@ -150,78 +150,12 @@ def get_edge_data(session: Session, id_list, chunk_size=1000, edge_limit=5) -> l
         yield [row for row in session.execute(main_query, {'ids': id_list[i:slice_end]})]
 
 
-def copy_assertion_records(session: Session) -> int:
-    logging.info('Starting assertion record copy')
-    session.execute(text('DELETE FROM targeted.assertion_2'))
-    logging.debug('Assertion records deleted')
-    insert_statement = text(
-        'INSERT INTO targeted.assertion_2 (assertion_id, subject_curie, object_curie, association_curie) '
-        'SELECT a.assertion_id '
-            ',IFNULL(u1.uniprot, a.subject_curie) AS subject_curie '
-            ',IFNULL(u2.uniprot, a.object_curie) AS object_curie '
-            ',a.association_curie '
-        'FROM assertion a '
-            'LEFT JOIN pr_to_uniprot u1 ON u1.pr = a.subject_curie AND u1.taxon = "NCBITaxon:9606" '
-            'LEFT JOIN pr_to_uniprot u2 ON u2.pr = a.object_curie AND u2.taxon = "NCBITaxon:9606" '
-    )
-    session.execute(insert_statement)
-    logging.debug('Insert statement executed, starting commit')
-    session.commit()
-    logging.debug('Insert complete')
-    value, = session.execute(text('SELECT COUNT(1) FROM targeted.assertion_2')).one()
-    # logging.info(f'{value} assertion records')
-    return value
-
-def copy_evidence_records(session: Session) -> int:
-    logging.info('Starting evidence record copy')
-    session.execute(text('DELETE FROM targeted.evidence_2'))
-    logging.debug('Evidence records deleted')
-    insert_statement = text(
-        'INSERT INTO targeted.evidence_2 (evidence_id, assertion_id, document_id, sentence, document_zone,'
-        ' document_publication_type, subject_span, subject_covered_text, object_span, object_covered_text,'
-        ' document_year_published, predicate_curie, score) '
-        'SELECT '
-        ' `e`.`evidence_id` AS `evidence_id` '
-        ',`e`.`assertion_id` AS `assertion_id` '
-        ',`e`.`document_id` AS `document_id` '
-        ',`e`.`sentence` AS `sentence` '
-        ',`e`.`document_zone` AS `document_zone` '
-        ',`e`.`document_publication_type` AS `document_publication_type` '
-        ',`se`.`span` AS `subject_span` '
-        ',`se`.`covered_text` AS `subject_covered_text` '
-        ',`oe`.`span` AS `object_span` '
-        ',`oe`.`covered_text` AS `object_covered_text` '
-        ',IFNULL(`dy`.`year`, `e`.`document_year_published`) AS `document_year_published` '
-        ',`t`.`predicate_curie` AS `predicate_curie` '
-        ',`t`.`score` AS `score` '
-        'FROM (((((`evidence` `e` '
-            'join `evidence_version` `ev` on((`e`.`evidence_id` = `ev`.`evidence_id`))) '
-            'join `entity` `se` on((`e`.`subject_entity_id` = `se`.`entity_id`))) '
-            'join `entity` `oe` on((`e`.`object_entity_id` = `oe`.`entity_id`))) '
-            'join `top_evidence_scores` `t` on((`e`.`evidence_id` = `t`.`evidence_id`))) '
-            'join `document_year` `dy` on((`e`.`document_id` = `dy`.`document_id`))) '
-        'WHERE ((`t`.`predicate_curie` <> "false") '
-            'and `e`.`superseded_by` IS NULL '
-            'and (`ev`.`version` = (SELECT MAX(version) FROM evidence_version)) '
-            'and `e`.`evidence_id` in ( '
-                'select `assertion_evidence_feedback`.`evidence_id` '
-                'from (`assertion_evidence_feedback` '
-                        'join `evidence_feedback_answer` '
-                            'on((`evidence_feedback_answer`.`feedback_id` = `assertion_evidence_feedback`.`id`))) '
-                'where ((`evidence_feedback_answer`.`prompt_text` = "Assertion Correct") '
-                    'and (`evidence_feedback_answer`.`response` = 0)) '
-            ') is false)'
-    )
-    session.execute(insert_statement)
-    logging.debug('Insert statement executed, starting commit')
-    session.commit()
-    logging.debug('Insert complete')
-    value, = session.execute(text('SELECT COUNT(1) FROM targeted.evidence_2')).one()
-    # logging.info(value)
-    return value
-
-
 def get_superseded_chunk(session: Session) -> list[tuple[str, str]]:
+    """
+    Gets up to 10000 evidence records where the PubMed document is superseded by a PMC document
+    :param session: the database session
+    :returns a list of tuples with the evidence record id and the PMC document ID that supersedes it.
+    """
     logging.info("get_superseded_chunk")
     query_text = text("""
     SELECT e1.evidence_id, e2.document_id
@@ -335,10 +269,3 @@ def export_edges(session: Session, nodes: set, bucket: str, blob_prefix: str,
         uniquify_edge_dict(edge_dict)
         services.write_edges(edge_dict, nodes, output_filename)
     services.upload_to_gcp(bucket, output_filename, f'{blob_prefix}{output_filename}')
-
-
-def export_edges_new(session: Session):
-    assertion_count = copy_assertion_records(session)
-    evidence_count = copy_evidence_records(session)
-    logging.info(f'Inserted {assertion_count} assertion records and {evidence_count} evidence records')
-
