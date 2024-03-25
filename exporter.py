@@ -14,6 +14,11 @@ from sqlalchemy.orm import sessionmaker
 GCP_BLOB_PREFIX = 'data/kgx-export/'
 
 def export_metadata(bucket):
+    """
+    Generate a metadata file from previously created KGX export files
+
+    :param bucket: the GCP storage bucket containing the KGX files
+    """
     services.get_from_gcp(bucket, GCP_BLOB_PREFIX + 'edges.tsv.gz', 'edges.tsv.gz')
     services.get_from_gcp(bucket, GCP_BLOB_PREFIX + 'nodes.tsv.gz', 'nodes.tsv.gz')
     services.generate_metadata('edges.tsv.gz', 'nodes.tsv.gz', 'KGE')
@@ -21,6 +26,12 @@ def export_metadata(bucket):
 
 
 def get_valid_nodes(bucket) -> set[str]:
+    """
+    Retrieve the set of nodes used by a KGX nodes file
+
+    :param bucket: the GCP storage bucket containing the KGX file
+    :returns a set of node curies
+    """
     services.get_from_gcp(bucket, GCP_BLOB_PREFIX + 'nodes.tsv.gz', 'nodes.tsv.gz')
     node_set = set([])
     with gzip.open('nodes.tsv.gz', 'rb') as infile:
@@ -53,7 +64,7 @@ if __name__ == "__main__":
     logging.info('Starting Main')
     parser = argparse.ArgumentParser()
     parser.add_argument('-t', '--target', help='the export target: edges, nodes, or metadata', required=True)
-    parser.add_argument('-uni', '--uniprot_bucket', help='storage bucket for UniProt data', required=True)
+    parser.add_argument('-uni', '--uniprot_bucket', help='storage bucket for UniProt data', required=True) # TODO: Replace with -b --bucket
     parser.add_argument('-i', '--instance', help='GCP DB instance name')
     parser.add_argument('-d', '--database', help='database name')
     parser.add_argument('-u', '--user', help='database username')
@@ -70,7 +81,7 @@ if __name__ == "__main__":
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
-    if args.target == 'metadata':
+    if args.target == 'metadata': # if we are just exporting metadata a database connection is not necessary
         export_metadata(uniprot_bucket)
     else:
         session_maker = init_db(

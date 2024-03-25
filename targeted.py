@@ -2,7 +2,6 @@ import gzip
 import logging
 import math
 
-import sqlalchemy
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from sqlalchemy import Column, String, Integer
@@ -90,6 +89,14 @@ def write_nodes(curies: list[str], normalize_dict: dict[str, dict], output_filen
 
 
 def get_assertion_ids(session, limit=600000, offset=0):
+    """
+    Get the assertion ids to be exported in this run
+
+    :param session: the database session
+    :param limit: limit for assertion query
+    :param offset: offset for assertion query
+    :returns a list of assertion ids
+    """
     id_query = text('SELECT assertion_id FROM targeted.assertion WHERE assertion_id NOT IN '
                     '(SELECT DISTINCT(assertion_id) '
                     'FROM assertion_evidence_feedback af '
@@ -110,6 +117,14 @@ def get_assertion_ids(session, limit=600000, offset=0):
 
 
 def get_edge_data(session: Session, id_list, chunk_size=1000, edge_limit=5) -> list[str]:
+    """
+    Generate edge data for the given list of ids
+    :param session: the database session
+    :param id_list: the list of assertion ids
+    :param chunk_size: the number of edge rows to yield at a time
+    :param edge_limit: the maximum number of evidence records to return for each edge
+    :returns edge data for up to chunk_size assertion ids from id_list with up to edge_limit supporting evidence records
+    """
     logging.info(f'\nStarting edge data gathering\nChunk Size: {chunk_size}\nEdge Limit: {edge_limit}\n')
     logging.info(f'Total Assertions: {len(id_list)}.')
     logging.info(f'Partition count: {math.ceil(len(id_list) / chunk_size)}')
