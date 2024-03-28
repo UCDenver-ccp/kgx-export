@@ -15,7 +15,21 @@ HUMAN_TAXON = 'NCBITaxon:9606'
 ORIGINAL_KNOWLEDGE_SOURCE = "infores:text-mining-provider-targeted"
 EXCLUDED_FIG_CURIES = ['DRUGBANK:DB10633', 'PR:000006421', 'PR:000008147', 'PR:000009005', 'PR:000031137',
                        'PR:Q04746', 'PR:Q04746', 'PR:Q7XZU3']
-
+EXCLUDE_LIST = ['CHEBI:35222', 'CHEBI:23888', 'CHEBI:36080', 'PR:000003944', 'PR:000011336', 'CL:0000000',
+                'PR:000000001', 'HP:0045088', 'HP:0001259', 'HP:0041092', 'HP:0031796', 'HP:0011011', 'HP:0001056',
+                'HP:0011010', 'MONDO:0021141', 'MONDO:0021152', 'HP:0000005', 'HP:0000005', 'MONDO:0017169',
+                'MONDO:0024497', 'MONDO:0000605', 'HP:0040285', 'HP:0025304', 'HP:0030645', 'HP:0025279',
+                'HP:0003676', 'HP:0030649', 'HP:0012835', 'HP:0003674', 'HP:0020034', 'HP:0002019', 'HP:0040282',
+                'HP:0040279', 'HP:0040279', 'HP:0032322', 'HP:0030645', 'HP:0011009', 'HP:0012829', 'HP:0030645',
+                'HP:0031375', 'HP:0030650', 'HP:0011009', 'HP:0012824', 'HP:0012828', 'HP:0012828', 'HP:0025287',
+                'HP:0025145', 'HP:0003676', 'HP:0003676', 'HP:0030645', 'MONDO:0005070', 'HP:0002664', 'MONDO:0021178',
+                'MONDO:0021137', 'MONDO:0002254', 'MONDO:0021136', 'HP:0012838', 'HP:0003680', 'HP:0031915',
+                'HP:0012837', 'HP:0040282', 'HP:0040279', 'HP:0040279', 'HP:0012840', 'HP:0410291', 'HP:0012830',
+                'HP:0025275', 'HP:0012831', 'HP:0012831', 'HP:0030646', 'MONDO:0021137', 'HP:0040279', 'HP:0040282',
+                'HP:0040282', 'HP:0040279', 'HP:0040282', 'HP:0040282', 'HP:0003680', 'HP:0012838', 'HP:0012834',
+                'HP:0200034', 'HP:0012825', 'HP:0040283', 'HP:0012824', 'HP:0012828', 'HP:0012828', 'HP:0100754',
+                'HP:0032320', 'HP:0030212', 'HP:0012826', 'HP:0003680', 'CHEBI:15377', 'DRUGBANK:DB09145',
+                'DRUGBANK:DB10632']
 
 class Evidence(Model):
     __tablename__ = 'evidence'
@@ -59,7 +73,7 @@ def get_node_data(session: Session, use_uniprot: bool = False) -> (list[str], di
     curies.extend([row[0] for row in session.query(text('DISTINCT object_curie FROM targeted.assertion')).all()])
     curies = list(set(curies))
     logging.info(f'node curies retrieved and uniquified ({len(curies)})')
-    curies = [curie for curie in curies if curie not in EXCLUDED_FIG_CURIES]
+    curies = [curie for curie in curies if curie not in EXCLUDED_FIG_CURIES and curie not in EXCLUDE_LIST]
     if use_uniprot:
         curies = [curie for curie in curies if not curie.startswith('PR:')]
     normalized_nodes = services.get_normalized_nodes(curies)
@@ -105,12 +119,15 @@ def get_assertion_ids(session, limit=600000, offset=0):
                     'INNER JOIN evidence_version ev ON ev.evidence_id = e.evidence_id '
                     'WHERE ef.prompt_text = \'Assertion Correct\' AND ef.response = 0 AND ev.version = 2) '
                     'AND subject_curie NOT IN :ex1 AND object_curie NOT IN :ex2 '
+                    'AND subject_curie NOT IN :ex3 AND object_curie NOT IN :ex4 '
                     'ORDER BY assertion_id '
                     'LIMIT :limit OFFSET :offset'
                     )
     return [row[0] for row in session.execute(id_query, {
         'ex1': EXCLUDED_FIG_CURIES,
         'ex2': EXCLUDED_FIG_CURIES,
+        'ex3': EXCLUDE_LIST,
+        'ex4': EXCLUDE_LIST,
         'limit': limit,
         'offset': offset
     })]

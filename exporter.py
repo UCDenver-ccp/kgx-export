@@ -11,7 +11,7 @@ from google.cloud.sql.connector import Connector
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-GCP_BLOB_PREFIX = 'data/kgx-export/'
+GCP_BLOB_PREFIX = 'kgx/UniProt/'
 
 def export_metadata(bucket):
     """

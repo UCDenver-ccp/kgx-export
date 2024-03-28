@@ -423,6 +423,8 @@ def get_edge(rows, predicate):
         qualified_predicate = 'biolink:causes'
         object_aspect_qualifier = 'activity_or_abundance'
         object_direction_qualifier = 'decreased'
+    elif predicate == 'biolink:treats':
+        predicate = 'biolink:treats_or_applied_or_studied_to_treat'
     elif predicate == 'biolink:gain_of_function_contributes_to':
         # predicate = 'biolink:affects'
         # qualified_predicate = 'biolink:contributes_to'
