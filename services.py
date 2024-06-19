@@ -253,8 +253,15 @@ def get_score(row):
 
 
 def get_assertion_json(rows):
-    semmed_count = sum([row['semmed_flag'] for row in rows])
+    # semmed_count = sum([row['semmed_flag'] for row in rows])
     row1 = rows[0]
+    supporting_publications = []
+    for row in rows:
+        document_id = row['document_id']
+        if document_id.startswith('PMC') and ':' not in document_id:
+            supporting_publications.append(document_id.replace('PMC', 'PMC:'))
+        else:
+            supporting_publications.append(document_id)
     attributes_list = [
         {
             "attribute_type_id": "biolink:primary_knowledge_source",
@@ -269,37 +276,40 @@ def get_assertion_json(rows):
             "attribute_source": "infores:text-mining-provider-targeted"
         },
         {
-            "attribute_type_id": "biolink:has_evidence_count",
+            "attribute_type_id": "biolink:evidence_count",
             "value": row1['evidence_count'],
             "value_type_id": "biolink:EvidenceCount",
             "attribute_source": "infores:text-mining-provider-targeted"
         },
         {
-            "attribute_type_id": "biolink:tmkp_confidence_score",
+            "attribute_type_id": "biolink:extraction_confidence_score",
             "value": get_aggregate_score(rows),
             "value_type_id": "biolink:ConfidenceLevel",
             "attribute_source": "infores:text-mining-provider-targeted"
         },
         {
-            "attribute_type_id": "biolink:supporting_document",
-            "value": '|'.join([row['document_id'] for row in rows]),
-            "value_type_id": "biolink:Publication",
+            "attribute_type_id": "biolink:publications",
+            "value": supporting_publications,
+            "value_type_id": "biolink:Uriorcurie",
             "attribute_source": "infores:pubmed"
         }
     ]
-    if semmed_count > 0:
-        attributes_list.append({
-            "attribute_type_id": "biolink:semmed_agreement_count",
-            "value": semmed_count,
-            "value_type_id": "SIO:000794",
-            "attribute_source": "infores:text-mining-provider-targeted"
-        })
+    # if semmed_count > 0:
+    #     attributes_list.append({
+    #         "attribute_type_id": "biolink:semmed_agreement_count",
+    #         "value": semmed_count,
+    #         "value_type_id": "SIO:000794",
+    #         "attribute_source": "infores:text-mining-provider-targeted"
+    #     })
     for row in rows:
         attributes_list.append(get_evidence_json(row))
     return json.dumps(attributes_list)
 
 
 def get_evidence_json(row):
+    document_id = row['document_id']
+    if document_id.startswith('PMC') and ':' not in document_id:
+        document_id = document_id.replace('PMC', 'PMC:')
     nested_attributes = [
         {
             "attribute_type_id": "biolink:supporting_text",
@@ -308,9 +318,9 @@ def get_evidence_json(row):
             "attribute_source": "infores:text-mining-provider-targeted"
         },
         {
-            "attribute_type_id": "biolink:supporting_document",
-            "value": row['document_id'],
-            "value_type_id": "biolink:Publication",
+            "attribute_type_id": "biolink:publications",
+            "value": document_id,
+            "value_type_id": "biolink:Uriorcurie",
             "value_url": f"https://pubmed.ncbi.nlm.nih.gov/{str(row['document_id']).split(':')[-1]}/",
             "attribute_source": "infores:pubmed"
         },
@@ -339,26 +349,26 @@ def get_evidence_json(row):
             "attribute_source": "infores:text-mining-provider-targeted "
         }
     ]
-    if row['document_year']:
+    if row['document_year_published']:
         nested_attributes.append(
             {
                 "attribute_type_id": "biolink:supporting_document_year",
-                "value": row['document_year'],
+                "value": row['document_year_published'],
                 "value_type_id": "UO:0000036",
                 "attribute_source": "infores:pubmed"
             }
         )
-    if row['semmed_flag'] == 1:
-        nested_attributes.append(
-            {
-                "attribute_type_id": "biolink:agrees_with_data_source",
-                "value": "infores:semmeddb",
-                "value_type_id": "biolink:InformationResource",
-                "attribute_source": "infores:text-mining-provider-targeted"
-            }
-        )
+    # if row['semmed_flag'] == 1:
+    #     nested_attributes.append(
+    #         {
+    #             "attribute_type_id": "biolink:agrees_with_data_source",
+    #             "value": "infores:semmeddb",
+    #             "value_type_id": "biolink:InformationResource",
+    #             "attribute_source": "infores:text-mining-provider-targeted"
+    #         }
+    #     )
     return {
-        "attribute_type_id": "biolink:supporting_study_result",
+        "attribute_type_id": "biolink:has_supporting_study_result",
         "value": f"tmkp:{row['evidence_id']}",
         "value_type_id": "biolink:TextMiningResult",
         "value_url": f"https://tmui.text-mining-kp.org/evidence/{row['evidence_id']}",
@@ -373,14 +383,26 @@ def get_edge(rows, predicate):
         logging.debug(f'No relevant rows for predicate {predicate}')
         return None
     row1 = relevant_rows[0]
-    if (row1['object_curie'].startswith('PR:') and not row1['object_uniprot']) or \
-            (row1['subject_curie'].startswith('PR:') and not row1['subject_uniprot']):
+    if row1['object_curie'].startswith('PR:') or row1['subject_curie'].startswith('PR:'):
         logging.debug(f"Could not get uniprot for pr curie ({row1['object_curie']}|{row1['subject_curie']})")
         return None
-    sub = row1['subject_uniprot'] if row1['subject_uniprot'] else row1['subject_curie']
-    obj = row1['object_uniprot'] if row1['object_uniprot'] else row1['object_curie']
+    sub = row1['subject_curie']
+    obj = row1['object_curie']
+    # if (row1['object_curie'].startswith('PR:') and not row1['object_uniprot']) or \
+    #         (row1['subject_curie'].startswith('PR:') and not row1['subject_uniprot']):
+    #     logging.debug(f"Could not get uniprot for pr curie ({row1['object_curie']}|{row1['subject_curie']})")
+    #     return None
+    # sub = row1['subject_uniprot'] if row1['subject_uniprot'] else row1['subject_curie']
+    # obj = row1['object_uniprot'] if row1['object_uniprot'] else row1['object_curie']
     supporting_study_results = '|'.join([f"tmkp:{row['evidence_id']}" for row in relevant_rows])
-    supporting_publications = '|'.join([row['document_id'] for row in relevant_rows])
+    supporting_publications = []
+    for row in relevant_rows:
+        document_id = row['document_id']
+        if document_id.startswith('PMC') and ':' not in document_id:
+            supporting_publications.append(document_id.replace('PMC', 'PMC:'))
+        else:
+            supporting_publications.append(document_id)
+    supporting_publications_string = '|'.join(supporting_publications)
     qualified_predicate = ''
     subject_aspect_qualifier = ''
     subject_direction_qualifier = ''
@@ -401,14 +423,18 @@ def get_edge(rows, predicate):
         qualified_predicate = 'biolink:causes'
         object_aspect_qualifier = 'activity_or_abundance'
         object_direction_qualifier = 'decreased'
+    elif predicate == 'biolink:treats':
+        predicate = 'biolink:treats_or_applied_or_studied_to_treat'
     elif predicate == 'biolink:gain_of_function_contributes_to':
-        predicate = 'biolink:affects'
-        qualified_predicate = 'biolink:contributes_to'
-        subject_form_or_variant_qualifier = 'gain_of_function_variant_form'
+        # predicate = 'biolink:affects'
+        # qualified_predicate = 'biolink:contributes_to'
+        # subject_form_or_variant_qualifier = 'gain_of_function_variant_form'
+        return None
     elif predicate == 'biolink:loss_of_function_contributes_to':
-        predicate = 'biolink:affects'
-        qualified_predicate = 'biolink:contributes_to'
-        subject_form_or_variant_qualifier = 'loss_of_function_variant_form'
+        # predicate = 'biolink:affects'
+        # qualified_predicate = 'biolink:contributes_to'
+        # subject_form_or_variant_qualifier = 'loss_of_function_variant_form'
+        return None
     return [sub, predicate, obj, qualified_predicate,
             subject_aspect_qualifier, subject_direction_qualifier,
             subject_part_qualifier, subject_form_or_variant_qualifier,
@@ -416,7 +442,7 @@ def get_edge(rows, predicate):
             object_part_qualifier, object_form_or_variant_qualifier,
             anatomical_context_qualifier,
             row1['assertion_id'], row1['association_curie'], get_aggregate_score(relevant_rows),
-            supporting_study_results, supporting_publications, get_assertion_json(relevant_rows)]
+            supporting_study_results, supporting_publications_string, get_assertion_json(relevant_rows)]
 
 
 def write_edges(edge_dict, nodes, output_filename):
@@ -425,8 +451,10 @@ def write_edges(edge_dict, nodes, output_filename):
     with open(output_filename, 'a') as outfile:
         for assertion, rows in edge_dict.items():
             row1 = rows[0]
-            sub = row1['subject_uniprot'] if row1['subject_uniprot'] else row1['subject_curie']
-            obj = row1['object_uniprot'] if row1['object_uniprot'] else row1['object_curie']
+            # sub = row1['subject_uniprot'] if row1['subject_uniprot'] else row1['subject_curie']
+            # obj = row1['object_uniprot'] if row1['object_uniprot'] else row1['object_curie']
+            sub = row1['subject_curie']
+            obj = row1['object_curie']
             if sub not in nodes or obj not in nodes:
                 continue
             predicates = set([row['predicate_curie'] for row in rows])
@@ -441,11 +469,53 @@ def write_edges(edge_dict, nodes, output_filename):
     logging.info(f'{len(skipped_assertions)} distinct assertions were skipped')
     logging.info("Edge output complete")
 
+def write_edges_gzip(edge_dict, nodes, output_filename):
+    logging.info("Starting edge output")
+    skipped_assertions = set([])
+    with gzip.open(output_filename, 'ab') as outfile:
+        for assertion, rows in edge_dict.items():
+            row1 = rows[0]
+            sub = row1['subject_uniprot'] if row1['subject_uniprot'] else row1['subject_curie']
+            obj = row1['object_uniprot'] if row1['object_uniprot'] else row1['object_curie']
+            if sub not in nodes or obj not in nodes:
+                continue
+            predicates = set([row['predicate_curie'] for row in rows])
+            for predicate in predicates:
+                edge = get_edge(rows, predicate)
+                if not edge:
+                    skipped_assertions.add(assertion)
+                    continue
+                line = b'\t'.join(bytes(str(val), encoding='utf-8') for val in edge) + b'\n'
+                throwaway_value = outfile.write(line)
+        outfile.flush()
+    logging.info(f'{len(skipped_assertions)} distinct assertions were skipped')
+    logging.info("Edge output complete")
+
+def generate_edges(edge_dict, nodes):
+    logging.info("Starting edge output")
+    skipped_assertions = set([])
+    for assertion, rows in edge_dict.items():
+        row1 = rows[0]
+        sub = row1['subject_uniprot'] if row1['subject_uniprot'] else row1['subject_curie']
+        obj = row1['object_uniprot'] if row1['object_uniprot'] else row1['object_curie']
+        if sub not in nodes or obj not in nodes:
+            continue
+        predicates = set([row['predicate_curie'] for row in rows])
+        for predicate in predicates:
+            edge = get_edge(rows, predicate)
+            if not edge:
+                skipped_assertions.add(assertion)
+                continue
+            yield '\t'.join(str(val) for val in edge) + '\n'
+    logging.info(f'{len(skipped_assertions)} distinct assertions were skipped')
+    logging.info("Edge output complete")
+
 
 def compress(infile, outfile):
     with open(infile, 'rb') as textfile:
         with gzip.open(outfile, 'wb') as gzfile:
             shutil.copyfileobj(textfile, gzfile)
+
 
 def decompress(infile, outfile):
     with gzip.open(infile, 'rb') as gzfile:
@@ -469,24 +539,18 @@ def generate_metadata(edgefile, nodefile, outdir):
     edge_file = os.path.join(outdir, "edges.tsv")
     metadata_file = os.path.join(outdir, "content_metadata.json")
 
-    node_lines = open(nodefile, 'r').readlines()
-    nodes = [node_line.strip().split('\t') for node_line in node_lines]
+    node_lines = gzip.open(nodefile, 'rb').readlines()
+    nodes = [node_line.decode().strip().split('\t') for node_line in node_lines]
     curies = [node[0] for node in nodes]
     for node in nodes:
         node_metadata_dict = update_node_metadata(node, node_metadata_dict, PRIMARY_KNOWLEDGE_SOURCE)
     normalized_nodes = get_normalized_nodes(curies)
-    with open(node_file, 'w') as outfile:
-        tmp = outfile.write('\t'.join(node_headers) + '\n')
-        for line in node_lines:
-            tmp = outfile.write(line)
 
     edge_metadata_dict = {}
-    with open(edgefile) as infile:
-        with open(edge_file, 'w') as outfile:
-            tmp = outfile.write('\t'.join(edge_headers) + '\n')
-            for line in infile:
-                tmp = outfile.write(line)
-                edge_metadata_dict = update_edge_metadata(line.split('\t'), edge_metadata_dict, normalized_nodes, PRIMARY_KNOWLEDGE_SOURCE)
+    with gzip.open(edgefile, 'rb') as infile:
+        for line in infile:
+            cols = line.decode().split('\t')
+            edge_metadata_dict = update_edge_metadata(cols, edge_metadata_dict, normalized_nodes, PRIMARY_KNOWLEDGE_SOURCE)
     metadata_dict = {
         "nodes": node_metadata_dict,
         "edges": list(edge_metadata_dict.values())
@@ -494,5 +558,5 @@ def generate_metadata(edgefile, nodefile, outdir):
     logging.info("Writing metadata file")
     with open(metadata_file, 'w') as outfile:
         outfile.write(json.dumps(metadata_dict))
-    logging.info("Creating tarball")
-    shutil.make_archive('targeted_assertions', 'gztar', root_dir=outdir)
+    # logging.info("Creating tarball")
+    # shutil.make_archive('targeted_assertions', 'gztar', root_dir=outdir)
