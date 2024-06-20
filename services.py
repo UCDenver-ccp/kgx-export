@@ -67,7 +67,7 @@ def upload_to_gcp(bucket_name: str, source_file_name: str, destination_blob_name
     """
     client = storage.Client()
     bucket = client.bucket(bucket_name)
-    logging.info(f'Uploading {source_file_name} to {destination_blob_name}')
+    logging.info(f'Uploading {source_file_name} to bucket: {bucket_name} path: {destination_blob_name}')
     blob = bucket.blob(destination_blob_name)
     blob.upload_from_filename(source_file_name, timeout=300, num_retries=2)
     if blob.exists() and os.path.isfile(source_file_name) and delete_source_file:
