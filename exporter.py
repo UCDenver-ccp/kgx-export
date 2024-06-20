@@ -64,7 +64,7 @@ if __name__ == "__main__":
     logging.info('Starting Main')
     parser = argparse.ArgumentParser()
     parser.add_argument('-t', '--target', help='the export target: edges, nodes, or metadata', required=True)
-    parser.add_argument('-uni', '--uniprot_bucket', help='storage bucket for UniProt data', required=True) # TODO: Replace with -b --bucket
+    parser.add_argument('-b', '--bucket', help='storage bucket for data', required=True)
     parser.add_argument('-i', '--instance', help='GCP DB instance name')
     parser.add_argument('-d', '--database', help='database name')
     parser.add_argument('-u', '--user', help='database username')
@@ -76,13 +76,13 @@ if __name__ == "__main__":
     parser.add_argument('-v', '--verbose', action='store_true')
     args = parser.parse_args()
 
-    uniprot_bucket = args.uniprot_bucket if args.uniprot_bucket else 'test_kgx_output_bucket'
+    bucket = args.bucket if args.bucket else 'test_kgx_output_bucket'
     os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'prod-creds.json'
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
     if args.target == 'metadata': # if we are just exporting metadata a database connection is not necessary
-        export_metadata(uniprot_bucket)
+        export_metadata(bucket)
     else:
         session_maker = init_db(
             instance=args.instance if args.instance else os.getenv('MYSQL_DATABASE_INSTANCE', None),
@@ -94,10 +94,10 @@ if __name__ == "__main__":
         logging.info("Exporting Targeted Assertion knowledge graph")
         logging.info("Exporting UniProt")
         if args.target == 'nodes':
-            targeted.export_nodes(session_maker(), uniprot_bucket, GCP_BLOB_PREFIX)
+            targeted.export_nodes(session_maker(), bucket, GCP_BLOB_PREFIX)
         else:
-            nodes = get_valid_nodes(uniprot_bucket)
-            targeted.export_edges(session_maker(), nodes, uniprot_bucket, GCP_BLOB_PREFIX,
+            nodes = get_valid_nodes(bucket)
+            targeted.export_edges(session_maker(), nodes, bucket, GCP_BLOB_PREFIX,
                                   assertion_start=args.assertion_offset, assertion_limit=args.assertion_limit,
                                   chunk_size=args.chunk_size, edge_limit=args.limit)
     logging.info("End Main")
