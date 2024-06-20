@@ -138,7 +138,7 @@ with models.DAG(dag_id='targeted-export', schedule_interval= '0 23 * * 6', defau
     
     cat_edge_files = BashOperator(
         task_id='targeted-cat-edge-files',
-        bash_command=f"cd /home/airflow/gcs/kgx/UniProt/ && cat edges*.tsv > edges.tsv && cp edges.tsv /home/airflow/gcs/data/kgx-export/")
+        bash_command=f"cd /home/airflow/gcs/data/kgx_build/ && cat edges*.tsv > edges.tsv && cp edges.tsv /home/airflow/gcs/data/kgx-export/")
 
     generate_metadata = KubernetesPodOperator(
         task_id='targeted-metadata',

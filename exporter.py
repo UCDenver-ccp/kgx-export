@@ -11,7 +11,7 @@ from google.cloud.sql.connector import Connector
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-GCP_BLOB_PREFIX = 'kgx/UniProt/'
+GCP_BLOB_PREFIX = 'data/kgx-export/'
 
 def export_metadata(bucket):
     """
@@ -97,7 +97,7 @@ if __name__ == "__main__":
             targeted.export_nodes(session_maker(), bucket, GCP_BLOB_PREFIX)
         else:
             nodes = get_valid_nodes(bucket)
-            targeted.export_edges(session_maker(), nodes, bucket, GCP_BLOB_PREFIX,
+            targeted.export_edges(session_maker(), nodes, bucket, "data/kgx-build/",
                                   assertion_start=args.assertion_offset, assertion_limit=args.assertion_limit,
                                   chunk_size=args.chunk_size, edge_limit=args.limit)
     logging.info("End Main")
