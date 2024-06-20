@@ -18,9 +18,15 @@ UNI_BUCKET = os.environ.get('UNI_BUCKET')
 TMP_BUCKET = os.environ.get('TMP_BUCKET')
 FAILURE_EMAIL = os.environ.get('FAILURE_EMAIL')
 START_DATE=datetime(2024, 3, 29, 0, 0)
-CHUNK_SIZE = '100000'
-EVIDENCE_LIMIT = '5'
-STEP_SIZE = 75000
+EVIDENCE_LIMIT = 5
+# STEP_SIZE = 75000 ### STEP_SIZE doesn't seem to be used
+# ASSERTION_LIMIT = 600000 # This is the default in Edgar's original implementation so keeping it for now
+# CHUNK_SIZE = '100000'
+
+# for testing
+ASSERTION_LIMIT = 25000
+CHUNK_SIZE = 5000
+
 
 
 default_args = {
@@ -71,6 +77,27 @@ def output_operations(**kwargs):
         x = outfile.write(json.dumps(operations_dict))
 
 
+def get_assertion_count():
+    # TODO: implement this as a database query
+    return 50000
+
+def generate_edge_export_arguments(assertion_limit, chunk_size, evidence_limit, bucket):
+    arguments_list = []
+    total_assertion_count = get_assertion_count()
+    incremental_assertion_count = 0
+    
+    while incremental_assertion_count < total_assertion_count:
+        arguments_list.append(['-t', 'edges', 
+                               '-b', bucket, 
+                               '--chunk_size', str(chunk_size), 
+                               '--limit', str(evidence_limit),
+                               '--assertion_offset', str(incremental_assertion_count),
+                               '--assertion_limit', str(assertion_limit)
+        ])
+        incremental_assertion_count += assertion_limit
+
+    return arguments_list
+
 with models.DAG(dag_id='targeted-export', default_args=default_args, catchup=False) as dag:
     filename_list = []
     export_task_list = []
@@ -88,14 +115,17 @@ with models.DAG(dag_id='targeted-export', default_args=default_args, catchup=Fal
             'MYSQL_DATABASE_INSTANCE': MYSQL_DATABASE_INSTANCE,
         },
         image='gcr.io/translator-text-workflow-dev/kgx-export:latest')
-    export_edges = KubernetesPodOperator(
+    
+
+
+    export_edges = KubernetesPodOperator.partial(
             task_id=f'targeted-edges',
             name=f'edge-export',
             config_file="/home/airflow/composer_kube_config",
             namespace='composer-user-workloads',
             image_pull_policy='Always',
             startup_timeout_seconds=1200,
-            arguments=['-t', 'edges', '-b', TMP_BUCKET, '--chunk_size', CHUNK_SIZE, '--limit', EVIDENCE_LIMIT],
+            # arguments=['-t', 'edges', '-b', TMP_BUCKET, '--chunk_size', CHUNK_SIZE, '--limit', EVIDENCE_LIMIT],
             env_vars={
                 'MYSQL_DATABASE_PASSWORD': MYSQL_DATABASE_PASSWORD,
                 'MYSQL_DATABASE_USER': MYSQL_DATABASE_USER,
@@ -106,7 +136,8 @@ with models.DAG(dag_id='targeted-export', default_args=default_args, catchup=Fal
             ),
             retries=1,
             image='gcr.io/translator-text-workflow-dev/kgx-export:latest'
-        )
+        ).expand(arguments=generate_edge_export_arguments(ASSERTION_LIMIT, CHUNK_SIZE, EVIDENCE_LIMIT, TMP_BUCKET))
+    
     generate_metadata = KubernetesPodOperator(
         task_id='targeted-metadata',
         name='targeted-metadata',
