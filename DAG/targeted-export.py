@@ -78,7 +78,7 @@ def output_operations(**kwargs):
 
 
 def get_assertion_count():
-    # TODO: implement this as a database query
+    # TODO: implement this as a database query - write output to the tmp bucket
     return 50000
 
 def generate_edge_export_arguments(assertion_limit, chunk_size, evidence_limit, bucket):
@@ -116,8 +116,6 @@ with models.DAG(dag_id='targeted-export', schedule_interval= '0 23 * * 6', defau
         },
         image='gcr.io/translator-text-workflow-dev/kgx-export:latest')
     
-
-
     export_edges = KubernetesPodOperator.partial(
             task_id=f'targeted-edges',
             name=f'edge-export',
@@ -138,6 +136,10 @@ with models.DAG(dag_id='targeted-export', schedule_interval= '0 23 * * 6', defau
             image='gcr.io/translator-text-workflow-dev/kgx-export:latest'
         ).expand(arguments=generate_edge_export_arguments(ASSERTION_LIMIT, CHUNK_SIZE, EVIDENCE_LIMIT, TMP_BUCKET))
     
+    cat_edge_files = BashOperator(
+        task_id='targeted-cat-edge-files',
+        bash_command=f"cd /home/airflow/gcs/data/kgx-export/ && cat edges*.tsv > edges.tsv")
+
     generate_metadata = KubernetesPodOperator(
         task_id='targeted-metadata',
         name='targeted-metadata',
@@ -146,6 +148,7 @@ with models.DAG(dag_id='targeted-export', schedule_interval= '0 23 * * 6', defau
         image_pull_policy='Always',
         arguments=['-t', 'metadata', '-b', TMP_BUCKET],
         image='gcr.io/translator-text-workflow-dev/kgx-export:latest')
+    
     generate_bte_operations = PythonOperator(
         task_id='generate_bte_operations',
         python_callable=output_operations,
@@ -153,11 +156,13 @@ with models.DAG(dag_id='targeted-export', schedule_interval= '0 23 * * 6', defau
         op_kwargs={'edges_filename': '/home/airflow/gcs/data/kgx-export/edges.tsv',
                    'output_filename': '/home/airflow/gcs/data/kgx-export/operations.json'},
         dag=dag)
+    
     compress_edge_file = BashOperator(
         task_id='targeted-compress',
         bash_command=f"cd /home/airflow/gcs/data/kgx-export/ && gzip -f edges.tsv")
+    
     publish_files = BashOperator(
         task_id='targeted-publish',
         bash_command=f"gsutil cp gs://{TMP_BUCKET}/data/kgx-export/* gs://{UNI_BUCKET}/kgx/UniProt/")
 
-    export_nodes >> export_edges >> generate_bte_operations >> compress_edge_file >> generate_metadata >> publish_files
+    export_nodes >> export_edges >> cat_edge_files >> generate_bte_operations >> compress_edge_file >> generate_metadata >> publish_files
