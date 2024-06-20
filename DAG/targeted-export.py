@@ -33,7 +33,7 @@ default_args = {
     'owner': 'airflow',
     'depends_on_past': False,
     'start_date': START_DATE,
-    'schedule_interval': '0 23 * * 6',
+    # 'schedule_interval': '0 23 * * 6',  # kubernetesPodOperator did not like this argument
     'email': [FAILURE_EMAIL],
     'email_on_failure': True,
     'email_on_retry': True,
@@ -98,7 +98,7 @@ def generate_edge_export_arguments(assertion_limit, chunk_size, evidence_limit, 
 
     return arguments_list
 
-with models.DAG(dag_id='targeted-export', default_args=default_args, catchup=False) as dag:
+with models.DAG(dag_id='targeted-export', schedule_interval= '0 23 * * 6', default_args=default_args, catchup=False) as dag:
     filename_list = []
     export_task_list = []
 
