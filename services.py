@@ -97,13 +97,13 @@ def update_node_metadata(node: list[str], node_metadata_dict: dict, source: str)
         if prefix not in node_metadata_dict[category]["id_prefixes"]:
             node_metadata_dict[category]["id_prefixes"].append(prefix)
         node_metadata_dict[category]["count"] += 1
-        node_metadata_dict[category]["count_by_source"]["primary_knowledge_source"][source] += 1
+        node_metadata_dict[category]["count_by_source"]["original_knowledge_source"][source] += 1
     else:
         node_metadata_dict[category] = {
             "id_prefixes": [prefix],
             "count": 1,
             "count_by_source": {
-                "primary_knowledge_source": {
+                "original_knowledge_source": {
                     source: 1
                 }
             }
@@ -124,12 +124,12 @@ def update_edge_metadata(edge: list, edge_metadata_dict: dict, node_dict: dict, 
     object_category = get_category(edge[0], normalized_nodes=node_dict)
     subject_category = get_category(edge[2], normalized_nodes=node_dict)
     triple = f"{object_category}|{edge[1]}|{subject_category}"
-    relation = edge[14]
+    relation = edge[1]
     if triple in edge_metadata_dict:
         if relation not in edge_metadata_dict[triple]["relations"]:
             edge_metadata_dict[triple]["relations"].append(relation)
         edge_metadata_dict[triple]["count"] += 1
-        edge_metadata_dict[triple]["count_by_source"]["primary_knowledge_source"][source] += 1
+        edge_metadata_dict[triple]["count_by_source"]["original_knowledge_source"][source] += 1
     else:
         edge_metadata_dict[triple] = {
             "subject": subject_category,
@@ -138,7 +138,7 @@ def update_edge_metadata(edge: list, edge_metadata_dict: dict, node_dict: dict, 
             "relations": [relation],
             "count": 1,
             "count_by_source": {
-                "primary_knowledge_source": {
+                "original_knowledge_source": {
                     source: 1
                 }
             }
@@ -263,6 +263,14 @@ def get_assertion_json(rows):
         else:
             supporting_publications.append(document_id)
     attributes_list = [
+        {
+            "attribute_type_id": "biolink:knowledge_level",
+            "value": "not_provided"
+        },
+        {
+            "attribute_type_id": "biolink:agent_type",
+            "value": "text-mining agent"
+        },
         {
             "attribute_type_id": "biolink:primary_knowledge_source",
             "value": "infores:text-mining-provider-targeted",
