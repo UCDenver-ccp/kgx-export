@@ -264,6 +264,14 @@ def get_assertion_json(rows):
             supporting_publications.append(document_id)
     attributes_list = [
         {
+            "attribute_type_id": "biolink:knowledge_level",
+            "value": "not_provided"
+        },
+        {
+            "attribute_type_id": "biolink:agent_type",
+            "value": "text-mining agent"
+        },
+        {
             "attribute_type_id": "biolink:primary_knowledge_source",
             "value": "infores:text-mining-provider-targeted",
             "value_type_id": "biolink:InformationResource",
