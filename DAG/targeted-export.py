@@ -138,7 +138,7 @@ with models.DAG(dag_id='targeted-export', schedule_interval= '0 23 * * 6', defau
     
     cat_edge_files = BashOperator(
         task_id='targeted-cat-edge-files',
-        bash_command=f"cd /home/airflow/gcs/data/kgx_build/ && cat edges*.tsv > edges.tsv && cp edges.tsv /home/airflow/gcs/data/kgx-export/")
+        bash_command=f"cd /home/airflow/gcs/data/kgx-build/ && cat edges*.tsv > edges.tsv && cp edges.tsv /home/airflow/gcs/data/kgx-export/")
 
     generate_metadata = KubernetesPodOperator(
         task_id='targeted-metadata',
@@ -164,5 +164,9 @@ with models.DAG(dag_id='targeted-export', schedule_interval= '0 23 * * 6', defau
     publish_files = BashOperator(
         task_id='targeted-publish',
         bash_command=f"gsutil cp gs://{TMP_BUCKET}/data/kgx-export/* gs://{UNI_BUCKET}/kgx/UniProt/")
+    
+    clean_up = BashOperator(
+        task_id='clean-up',
+        bash_command=f"cd /home/airflow/gcs/data/kgx-build/ && rm *.tsv")
 
-    export_nodes >> export_edges >> cat_edge_files >> generate_bte_operations >> compress_edge_file >> generate_metadata >> publish_files
+    export_nodes >> export_edges >> cat_edge_files >> generate_bte_operations >> compress_edge_file >> generate_metadata >> publish_files >> clean_up
