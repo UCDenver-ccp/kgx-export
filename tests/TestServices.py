@@ -73,7 +73,7 @@ class ServicesTestCase(unittest.TestCase):
                 "id_prefixes": ["CHEBI"],
                 "count": 1,
                 "count_by_source": {
-                    "original_knowledge_source": {
+                    "primary_knowledge_source": {
                         "infores:text-mining-provider-targeted": 1
                     }
                 }
@@ -91,7 +91,7 @@ class ServicesTestCase(unittest.TestCase):
                 "id_prefixes": ["CHEBI"],
                 "count": 1,
                 "count_by_source": {
-                    "original_knowledge_source": {
+                    "primary_knowledge_source": {
                         "infores:text-mining-provider-targeted": 1
                     }
                 }
@@ -102,7 +102,7 @@ class ServicesTestCase(unittest.TestCase):
                 "id_prefixes": ["CHEBI"],
                 "count": 2,
                 "count_by_source": {
-                    "original_knowledge_source": {
+                    "primary_knowledge_source": {
                         "infores:text-mining-provider-targeted": 2
                     }
                 }
@@ -122,7 +122,7 @@ class ServicesTestCase(unittest.TestCase):
                 "relations": ["biolink:entity_negatively_regulates_entity"],
                 "count": 1,
                 "count_by_source": {
-                    "original_knowledge_source": {
+                    "primary_knowledge_source": {
                         "infores:text-mining-provider-targeted": 1
                     }
                 }
@@ -144,7 +144,7 @@ class ServicesTestCase(unittest.TestCase):
                 "relations": ["biolink:entity_negatively_regulates_entity"],
                 "count": 1,
                 "count_by_source": {
-                    "original_knowledge_source": {
+                    "primary_knowledge_source": {
                         "infores:text-mining-provider-targeted": 1
                     }
                 }
@@ -158,7 +158,7 @@ class ServicesTestCase(unittest.TestCase):
                 "relations": ["biolink:entity_negatively_regulates_entity"],
                 "count": 2,
                 "count_by_source": {
-                    "original_knowledge_source": {
+                    "primary_knowledge_source": {
                         "infores:text-mining-provider-targeted": 2
                     }
                 }
@@ -179,7 +179,7 @@ class ServicesTestCase(unittest.TestCase):
                 "relations": ["biolink:entity_negatively_regulates_entity"],
                 "count": 1,
                 "count_by_source": {
-                    "original_knowledge_source": {
+                    "primary_knowledge_source": {
                         "infores:text-mining-provider-targeted": 1
                     }
                 }
@@ -193,7 +193,7 @@ class ServicesTestCase(unittest.TestCase):
                 "relations": ["biolink:entity_negatively_regulates_entity"],
                 "count": 2,
                 "count_by_source": {
-                    "original_knowledge_source": {
+                    "primary_knowledge_source": {
                         "infores:text-mining-provider-targeted": 2
                     }
                 }
