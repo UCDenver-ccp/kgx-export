@@ -71,7 +71,7 @@ def output_operations(**kwargs):
         x = outfile.write(json.dumps(operations_dict))
 
 
-with models.DAG(dag_id='targeted-export', default_args=default_args, catchup=True) as dag:
+with models.DAG(dag_id='targeted-export', default_args=default_args, catchup=False) as dag:
     filename_list = []
     export_task_list = []
 
