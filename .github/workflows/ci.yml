@@ -22,3 +22,42 @@ jobs:
           pip install -r requirements.txt
       - name: Test with pytest
         run: python -m pytest -vv tests/TestTargeted.py tests/TestServices.py
+
+  build_kgx_export_container:
+    name: "build/push kgx-export container"
+    runs-on: ubuntu-latest
+    env:
+      DOCKERFILE: Dockerfile
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - id: 'auth'
+      uses: 'google-github-actions/auth@v2'
+      with:
+        project_id: ${{ secrets.GCE_PROJECT }}
+        service_account: ${{ secrets.SERVICE_ACCOUNT }}
+        credentials_json: ${{ secrets.SERVICE_ACCOUNT_KEY }}
+    - name: 'Set up Cloud SDK'
+      uses: 'google-github-actions/setup-gcloud@v2'
+      with:
+        version: '>= 363.0.0'
+    - name: Setup Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.7
+
+    - name: Configure Docker Authentication
+      run: |
+        gcloud --quiet auth configure-docker
+
+    - name: Build Docker Image
+      run: |
+        docker build --tag "gcr.io/$PROJECT_ID/kgx-export" \
+                     -f ${{ env.DOCKERFILE }} .
+
+    - name: Publish Docker Image to Google Container Registry
+      run: |
+        docker push "gcr.io/$PROJECT_ID/kgx-export"
+
+      timeout-minutes: 15
