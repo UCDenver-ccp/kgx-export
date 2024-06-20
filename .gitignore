@@ -178,3 +178,5 @@ cython_debug/
 
 .vscode/settings.json
 .vscode/launch.json
+cloudbuild.yml
+prod-creds.json
