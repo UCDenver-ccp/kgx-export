@@ -269,7 +269,7 @@ def get_assertion_json(rows):
         },
         {
             "attribute_type_id": "biolink:agent_type",
-            "value": "text-mining agent"
+            "value": "text_mining_agent"
         },
         {
             "attribute_type_id": "biolink:primary_knowledge_source",
