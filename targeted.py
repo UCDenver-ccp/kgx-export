@@ -133,6 +133,34 @@ def get_assertion_ids(session, limit=600000, offset=0):
     })]
 
 
+
+def get_assertion_count(session):
+    """
+    Count the number of assertions that will be exported
+
+    :param session: the database session
+    :param limit: limit for assertion query
+    :param offset: offset for assertion query
+    :returns a list of assertion ids
+    """
+    count_query = text('SELECT count(assertion_id) FROM targeted.assertion WHERE assertion_id NOT IN '
+                    '(SELECT DISTINCT(assertion_id) '
+                    'FROM assertion_evidence_feedback af '
+                    'INNER JOIN evidence_feedback_answer ef '
+                    'INNER JOIN evidence e ON e.evidence_id = af.evidence_id '
+                    'INNER JOIN evidence_version ev ON ev.evidence_id = e.evidence_id '
+                    'WHERE ef.prompt_text = \'Assertion Correct\' AND ef.response = 0 AND ev.version = 2) '
+                    'AND subject_curie NOT IN :ex1 AND object_curie NOT IN :ex2 '
+                    'AND subject_curie NOT IN :ex3 AND object_curie NOT IN :ex4 '
+                    )
+    return [row[0] for row in session.execute(count_query, {
+        'ex1': EXCLUDED_FIG_CURIES,
+        'ex2': EXCLUDED_FIG_CURIES,
+        'ex3': EXCLUDE_LIST,
+        'ex4': EXCLUDE_LIST
+    })]
+
+
 def get_edge_data(session: Session, id_list, chunk_size=1000, edge_limit=5) -> list[str]:
     """
     Generate edge data for the given list of ids
@@ -285,4 +313,18 @@ def export_edges(session: Session, nodes: set, bucket: str, blob_prefix: str,
         edge_dict = create_edge_dict(rows)
         uniquify_edge_dict(edge_dict)
         services.write_edges(edge_dict, nodes, output_filename)
+    services.upload_to_gcp(bucket, output_filename, f'{blob_prefix}{output_filename}')
+
+def export_assertion_count(session: Session, bucket: str, blob_prefix: str) -> None:
+    """
+    Count the number of assertions to be exported and save the number to a file
+
+    :param session: the database session
+    :param bucket: the output GCP bucket name
+    :param blob_prefix: the directory prefix for the file to be saved
+    """
+    output_filename = f'assertion.count'
+    assertion_count = get_assertion_count(session)
+    with open(output_filename, 'a') as outfile:
+        outfile.write(str(assertion_count[0]))
     services.upload_to_gcp(bucket, output_filename, f'{blob_prefix}{output_filename}')
